@@ -48,14 +48,22 @@ async def lifespan(app: FastAPI):
     """
     # Startup
     logger.info(f"Starting {settings.APP_NAME} v{settings.APP_VERSION}")
-    logger.info(f"Database URL: {settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else 'configured'}")
+    try:
+        if settings.DATABASE_URL:
+            # Mask password in logs
+            db_url_display = settings.DATABASE_URL.split('@')[-1] if '@' in settings.DATABASE_URL else 'configured'
+            logger.info(f"Database URL: {db_url_display}")
+        else:
+            logger.warning("DATABASE_URL not configured")
+    except Exception as e:
+        logger.warning(f"Error logging database URL: {e}")
     
     # Initialize database tables
     try:
         Base.metadata.create_all(bind=engine)
         logger.info("Database tables initialized successfully")
     except Exception as e:
-        logger.warning(f"Database connection failed: {e}")
+        logger.error(f"Database connection failed: {e}", exc_info=True)
         logger.warning("Server will start but database features will be unavailable.")
         logger.warning("Please ensure PostgreSQL is running and DATABASE_URL is correct in .env")
     

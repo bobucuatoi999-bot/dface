@@ -92,9 +92,13 @@ else
 fi
 echo ""
 
-# Auto-create admin user if none exists
+# Auto-create admin user if none exists (don't fail if this errors)
 echo "Checking for admin user..."
-python auto_create_admin.py 2>&1 || echo "⚠️  Could not check/create admin user (non-critical)"
+if python auto_create_admin.py 2>&1; then
+    echo "✓ Admin check completed"
+else
+    echo "⚠️  Could not check/create admin user (non-critical - continuing startup)"
+fi
 echo ""
 
 # Start uvicorn with error handling
