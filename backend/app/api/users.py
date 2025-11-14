@@ -626,6 +626,74 @@ async def delete_user(
     return None
 
 
+@router.post("/detect-faces")
+async def detect_faces_endpoint(
+    request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    Detect faces in an image (for real-time face tracking during registration).
+    
+    Request body:
+    {
+        "image_data": "<base64_encoded_image>"
+    }
+    
+    Returns:
+    {
+        "faces": [
+            {
+                "bbox": [top, right, bottom, left],
+                "confidence": 1.0
+            }
+        ],
+        "face_count": 1
+    }
+    """
+    if not FACE_RECOGNITION_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Face detection services are not available"
+        )
+    
+    try:
+        image_data = request.get("image_data")
+        if not image_data:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="image_data is required"
+            )
+        
+        # Decode image
+        image = decode_base64_image(image_data)
+        
+        # Detect faces
+        face_locations = face_detection_service.detect_faces(image)
+        
+        # Format response
+        faces = []
+        for face_loc in face_locations:
+            top, right, bottom, left = face_loc
+            faces.append({
+                "bbox": [int(top), int(right), int(bottom), int(left)],
+                "confidence": 1.0  # face_recognition doesn't provide confidence, assume 1.0
+            })
+        
+        return {
+            "faces": faces,
+            "face_count": len(faces)
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error detecting faces: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error detecting faces: {str(e)}"
+        )
+
+
 @router.get("/{user_id}/faces", response_model=List[FaceEmbeddingResponse])
 async def get_user_faces(
     user_id: int,

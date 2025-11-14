@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { usersAPI } from '../services/api'
-import { startCamera, stopCamera, startVideoRecording, videoBlobToBase64 } from '../utils/camera'
+import { startCamera, stopCamera, startVideoRecording, videoBlobToBase64, captureFrame, imageToBase64 } from '../utils/camera'
 import './RegisterUserPage.css'
 
 function RegisterUserPage() {
@@ -15,11 +15,15 @@ function RegisterUserPage() {
   const [recordingTime, setRecordingTime] = useState(0)
   const [videoDuration, setVideoDuration] = useState(0)
   const [validationInfo, setValidationInfo] = useState(null)
+  const [facesDetected, setFacesDetected] = useState([])
+  const [faceDetectionStatus, setFaceDetectionStatus] = useState(null) // 'detecting', 'detected', 'none'
   
   const videoRef = useRef(null)
   const streamRef = useRef(null)
   const recorderRef = useRef(null)
   const timerRef = useRef(null)
+  const canvasRef = useRef(null)
+  const detectionIntervalRef = useRef(null)
   const [cameraActive, setCameraActive] = useState(false)
 
   useEffect(() => {
@@ -30,8 +34,78 @@ function RegisterUserPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current)
       }
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current)
+      }
     }
   }, [])
+
+  // Draw face detection boxes on canvas
+  const drawFaceBoxes = (faces) => {
+    const canvas = canvasRef.current
+    const video = videoRef.current
+    if (!canvas || !video || !video.videoWidth || !video.videoHeight) return
+    
+    const ctx = canvas.getContext('2d')
+    
+    // Set canvas size to match video
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    
+    // Clear canvas
+    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    
+    if (faces && faces.length > 0) {
+      faces.forEach((face) => {
+        const [top, right, bottom, left] = face.bbox
+        const width = right - left
+        const height = bottom - top
+        
+        // Draw bounding box
+        ctx.strokeStyle = '#00ff00' // Green for detected face
+        ctx.lineWidth = 3
+        ctx.strokeRect(left, top, width, height)
+        
+        // Draw label background
+        ctx.fillStyle = '#00ff00'
+        ctx.fillRect(left, top - 25, Math.max(120, 100), 25)
+        
+        // Draw label text
+        ctx.fillStyle = 'white'
+        ctx.font = 'bold 14px sans-serif'
+        ctx.fillText('Face Detected', left + 5, top - 8)
+      })
+      setFaceDetectionStatus('detected')
+    } else {
+      setFaceDetectionStatus('none')
+    }
+  }
+
+  // Detect faces in video frame
+  const detectFacesInFrame = async () => {
+    if (!videoRef.current || !isRecording || !cameraActive) return
+    
+    try {
+      // Capture frame
+      const imageData = await captureFrame(videoRef.current)
+      const base64Image = imageToBase64(imageData)
+      
+      // Call face detection API
+      const result = await usersAPI.detectFaces(base64Image)
+      
+      if (result && result.faces) {
+        setFacesDetected(result.faces)
+        drawFaceBoxes(result.faces)
+      } else {
+        setFacesDetected([])
+        drawFaceBoxes([])
+      }
+    } catch (error) {
+      // Silently handle errors to avoid interrupting recording
+      console.error('Face detection error:', error)
+      setFaceDetectionStatus(null)
+    }
+  }
 
   const startVideo = async () => {
     try {
@@ -57,8 +131,20 @@ function RegisterUserPage() {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current)
+      detectionIntervalRef.current = null
+    }
     setIsRecording(false)
     setRecordingTime(0)
+    // Clear canvas
+    const canvas = canvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+    setFacesDetected([])
+    setFaceDetectionStatus(null)
   }
 
   const startRecording = async () => {
@@ -96,6 +182,12 @@ function RegisterUserPage() {
         }
       }, 100)
 
+      // Start face detection during recording (every 300ms = ~3 FPS)
+      setFaceDetectionStatus('detecting')
+      detectionIntervalRef.current = setInterval(() => {
+        detectFacesInFrame()
+      }, 300)
+
       // Wait for recording to complete (will auto-stop at 7 seconds)
       const videoBlob = await promise
       
@@ -103,6 +195,19 @@ function RegisterUserPage() {
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
+      }
+      
+      // Stop face detection
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current)
+        detectionIntervalRef.current = null
+      }
+      
+      // Clear canvas
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
       }
       
       // Store final duration (7 seconds)
@@ -116,6 +221,10 @@ function RegisterUserPage() {
       
       // Stop camera after recording
       stopVideo()
+      
+      // Reset face detection
+      setFacesDetected([])
+      setFaceDetectionStatus(null)
     } catch (error) {
       console.error('Recording error:', error)
       setError('Failed to record video: ' + error.message)
@@ -258,31 +367,111 @@ function RegisterUserPage() {
                         className="camera-preview"
                         style={{ display: cameraActive ? 'block' : 'none' }}
                       />
+                      {/* Canvas overlay for face detection boxes */}
+                      <canvas
+                        ref={canvasRef}
+                        style={{
+                          position: 'absolute',
+                          top: 0,
+                          left: 0,
+                          width: '100%',
+                          height: '100%',
+                          pointerEvents: 'none',
+                          zIndex: 10
+                        }}
+                      />
                       
                       {isRecording && (
-                        <div style={{
-                          position: 'absolute',
-                          top: '16px',
-                          left: '16px',
-                          background: 'rgba(255, 0, 0, 0.8)',
-                          color: 'white',
-                          padding: '8px 16px',
-                          borderRadius: '8px',
-                          fontSize: '18px',
-                          fontWeight: 'bold',
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px'
-                        }}>
-                          <span style={{
-                            width: '12px',
-                            height: '12px',
-                            background: 'white',
-                            borderRadius: '50%',
-                            animation: 'blink 1s infinite'
-                          }}></span>
-                          Recording... {recordingTime.toFixed(1)}s
-                        </div>
+                        <>
+                          <div style={{
+                            position: 'absolute',
+                            top: '16px',
+                            left: '16px',
+                            background: 'rgba(255, 0, 0, 0.8)',
+                            color: 'white',
+                            padding: '8px 16px',
+                            borderRadius: '8px',
+                            fontSize: '18px',
+                            fontWeight: 'bold',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '8px',
+                            zIndex: 20
+                          }}>
+                            <span style={{
+                              width: '12px',
+                              height: '12px',
+                              background: 'white',
+                              borderRadius: '50%',
+                              animation: 'blink 1s infinite'
+                            }}></span>
+                            Recording... {recordingTime.toFixed(1)}s
+                          </div>
+                          
+                          {/* Face Detection Status Indicator */}
+                          {faceDetectionStatus === 'detecting' && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '16px',
+                              right: '16px',
+                              background: 'rgba(255, 165, 0, 0.8)',
+                              color: 'white',
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: 'bold',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              zIndex: 20
+                            }}>
+                              <span>🔍</span>
+                              Detecting...
+                            </div>
+                          )}
+                          
+                          {faceDetectionStatus === 'detected' && facesDetected.length > 0 && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '16px',
+                              right: '16px',
+                              background: 'rgba(0, 255, 0, 0.8)',
+                              color: 'white',
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: 'bold',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              zIndex: 20
+                            }}>
+                              <span>✅</span>
+                              Face Detected ({facesDetected.length})
+                            </div>
+                          )}
+                          
+                          {faceDetectionStatus === 'none' && (
+                            <div style={{
+                              position: 'absolute',
+                              top: '16px',
+                              right: '16px',
+                              background: 'rgba(255, 0, 0, 0.8)',
+                              color: 'white',
+                              padding: '8px 16px',
+                              borderRadius: '8px',
+                              fontSize: '14px',
+                              fontWeight: 'bold',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '8px',
+                              zIndex: 20
+                            }}>
+                              <span>⚠️</span>
+                              No Face Detected
+                            </div>
+                          )}
+                        </>
                       )}
                       
                       {!cameraActive && !isRecording && (

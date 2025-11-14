@@ -123,6 +123,13 @@ export const usersAPI = {
     })
     return response.data
   },
+  
+  detectFaces: async (imageData) => {
+    const response = await api.post('/api/users/detect-faces', {
+      image_data: imageData
+    })
+    return response.data
+  },
 }
 
 // Logs API
