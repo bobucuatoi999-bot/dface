@@ -46,11 +46,49 @@ class AuthService:
     
     def verify_password(self, plain_password: str, hashed_password: str) -> bool:
         """Verify a password against its hash."""
-        return pwd_context.verify(plain_password, hashed_password)
+        if USE_BCRYPT_DIRECTLY:
+            import bcrypt
+            try:
+                # bcrypt expects bytes
+                return bcrypt.checkpw(
+                    plain_password.encode('utf-8'),
+                    hashed_password.encode('utf-8')
+                )
+            except Exception as e:
+                logger.error(f"Bcrypt verification error: {e}")
+                return False
+        else:
+            # Use passlib
+            if pwd_context is None:
+                logger.error("Password context not initialized")
+                return False
+            try:
+                return pwd_context.verify(plain_password, hashed_password)
+            except Exception as e:
+                logger.error(f"Password verification error: {e}")
+                return False
     
     def get_password_hash(self, password: str) -> str:
         """Hash a password."""
-        return pwd_context.hash(password)
+        if USE_BCRYPT_DIRECTLY:
+            import bcrypt
+            try:
+                # bcrypt expects bytes and returns bytes
+                hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt(rounds=12))
+                return hashed.decode('utf-8')
+            except Exception as e:
+                logger.error(f"Bcrypt hashing error: {e}")
+                raise
+        else:
+            # Use passlib
+            if pwd_context is None:
+                logger.error("Password context not initialized")
+                raise ValueError("Password context not initialized")
+            try:
+                return pwd_context.hash(password)
+            except Exception as e:
+                logger.error(f"Password hashing error: {e}")
+                raise
     
     def create_access_token(self, data: dict, expires_delta: Optional[timedelta] = None) -> str:
         """
