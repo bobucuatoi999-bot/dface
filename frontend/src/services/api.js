@@ -38,11 +38,12 @@ api.interceptors.response.use(
 // Auth API
 export const authAPI = {
   login: async (username, password) => {
-    const formData = new FormData()
-    formData.append('username', username)
-    formData.append('password', password)
+    // Use URLSearchParams for application/x-www-form-urlencoded format
+    const params = new URLSearchParams()
+    params.append('username', username)
+    params.append('password', password)
     
-    const response = await axios.post(`${API_BASE_URL}/api/auth/login`, formData, {
+    const response = await axios.post(`${API_BASE_URL}/api/auth/login`, params, {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
     })
     return response.data
