@@ -302,11 +302,16 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
     try:
         from app.models.auth import AuthUser, UserRole
         from app.services.auth_service import AuthService
+        from passlib.context import CryptContext
+        
+        logger.info("=== CREATE ADMIN ENDPOINT CALLED ===")
         
         # Check if admin exists
         existing_admin = db.query(AuthUser).filter(AuthUser.role == UserRole.ADMIN).first()
+        logger.info(f"Existing admin check: {existing_admin}")
         
         if existing_admin:
+            logger.info(f"Admin user already exists: {existing_admin.username} (ID: {existing_admin.id})")
             return {
                 "status": "exists",
                 "message": f"Admin user already exists: {existing_admin.username}",
@@ -314,50 +319,96 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
                 "id": existing_admin.id
             }
         
-        # Create admin user
-        auth_service = AuthService()
+        # Create admin user - do it directly to ensure it works
         username = os.getenv("ADMIN_USERNAME", "admin")
         password = os.getenv("ADMIN_PASSWORD", "admin123")
         email = os.getenv("ADMIN_EMAIL", "admin@facestream.local")
         
-        logger.info(f"Creating admin user via endpoint: {username}")
+        logger.info(f"Creating admin user: {username}")
+        logger.info(f"Email: {email}")
+        logger.info(f"Role: admin")
         
-        admin = auth_service.create_user(
-            db=db,
+        # Hash password directly
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+        hashed_password = pwd_context.hash(password)
+        logger.info(f"Password hashed: {hashed_password[:20]}...")
+        
+        # Create user directly
+        admin = AuthUser(
             username=username,
-            password=password,
             email=email,
-            role=UserRole.ADMIN
+            hashed_password=hashed_password,
+            role=UserRole.ADMIN,
+            is_active=True
         )
         
-        # Verify user was created
-        db.refresh(admin)
-        verify_user = db.query(AuthUser).filter(AuthUser.username == username).first()
+        logger.info(f"User object created: {admin}")
         
-        if verify_user and auth_service.verify_password(password, verify_user.hashed_password):
-            logger.info(f"Admin user created successfully: {username}")
+        # Add to database
+        db.add(admin)
+        logger.info("User added to session")
+        
+        # Commit transaction
+        try:
+            db.commit()
+            logger.info("Transaction committed successfully")
+        except Exception as commit_error:
+            logger.error(f"Commit failed: {commit_error}", exc_info=True)
+            db.rollback()
+            raise commit_error
+        
+        # Refresh to get ID
+        db.refresh(admin)
+        logger.info(f"User refreshed - ID: {admin.id}")
+        
+        # Verify user was created - query again
+        verify_user = db.query(AuthUser).filter(AuthUser.id == admin.id).first()
+        logger.info(f"Verify user query result: {verify_user}")
+        
+        if not verify_user:
+            logger.error("User was not found after commit!")
+            return {
+                "status": "error",
+                "message": "User was not found after commit",
+                "username": username
+            }
+        
+        # Verify password
+        auth_service = AuthService()
+        password_verified = auth_service.verify_password(password, verify_user.hashed_password)
+        logger.info(f"Password verification: {password_verified}")
+        
+        if password_verified:
+            logger.info(f"✅ Admin user created successfully: {username} (ID: {verify_user.id})")
             return {
                 "status": "created",
                 "message": f"Admin user created successfully",
                 "username": username,
                 "password": password,
-                "id": admin.id,
+                "id": verify_user.id,
+                "email": email,
+                "role": "admin",
+                "is_active": verify_user.is_active,
                 "verified": True
             }
         else:
-            logger.error(f"Admin user creation failed verification")
+            logger.error("Password verification failed!")
             return {
                 "status": "error",
-                "message": "Admin user creation failed verification",
+                "message": "Password verification failed",
                 "username": username
             }
             
     except Exception as e:
         logger.error(f"Error creating admin: {e}", exc_info=True)
+        import traceback
+        error_trace = traceback.format_exc()
+        logger.error(f"Traceback: {error_trace}")
         return {
             "status": "error",
             "message": f"Error creating admin: {str(e)}",
-            "error": str(e)
+            "error": str(e),
+            "traceback": error_trace
         }
 
 
