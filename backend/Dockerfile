@@ -68,27 +68,20 @@ RUN echo "Installing opencv-python..." && \
 ENV DLIB_USE_CUDA=0
 ENV DLIB_USE_BLAS=1
 
-# Download dlib source directly from PyPI (avoid pip download build dependencies)
+# Download, extract, patch, and install dlib in one step
+# This ensures the directory is available when pip install runs
 RUN echo "Downloading dlib source from PyPI..." && \
     wget -q https://files.pythonhosted.org/packages/source/d/dlib/dlib-19.24.2.tar.gz && \
-    echo "✓ dlib source downloaded"
-
-# Extract and patch dlib
-RUN DLIB_TAR=$(ls dlib-*.tar.gz | head -1) && \
-    echo "Extracting $DLIB_TAR..." && \
-    tar -xzf "$DLIB_TAR" && \
-    DLIB_DIR=$(ls -d dlib-* | head -1) && \
+    echo "Extracting dlib..." && \
+    tar -xzf dlib-19.24.2.tar.gz && \
+    DLIB_DIR="dlib-19.24.2" && \
     echo "Patching pybind11 CMakeLists.txt for CMake compatibility..." && \
     find "$DLIB_DIR" -name "CMakeLists.txt" -path "*/pybind11/*" -exec sed -i 's/cmake_minimum_required(VERSION 3.5)/cmake_minimum_required(VERSION 3.10)/' {} \; && \
     echo "✓ Patch applied" && \
-    rm -f "$DLIB_TAR"
-
-# Install patched dlib
-RUN echo "Installing dlib (this will take 10-15 minutes)..." && \
+    echo "Installing dlib (this will take 10-15 minutes)..." && \
     echo "Using BLAS for faster compilation..." && \
-    DLIB_DIR=$(ls -d dlib-* | head -1) && \
-    pip install --no-cache-dir --no-build-isolation "$DLIB_DIR" && \
-    rm -rf "$DLIB_DIR" && \
+    pip install --no-cache-dir --no-build-isolation "./$DLIB_DIR" && \
+    rm -rf "$DLIB_DIR" dlib-19.24.2.tar.gz && \
     echo "✓ dlib installed successfully"
 
 # Install face-recognition last (depends on dlib)
