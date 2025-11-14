@@ -11,10 +11,13 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
+    python3-dev \
+    python3-pip \
     libopenblas-dev \
     liblapack-dev \
     libx11-dev \
     libgtk-3-dev \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # Install core dependencies first (fast, required for app to run)
@@ -45,11 +48,35 @@ COPY requirements.txt .
 
 # Install face recognition dependencies
 # These packages take 15-20+ minutes to compile but are required for live video recognition
-RUN echo "Installing face recognition packages (this may take 15-20 minutes)..." && \
+# Install them separately to catch errors early
+RUN echo "==========================================" && \
+    echo "Installing face recognition packages..." && \
+    echo "This may take 15-20 minutes (especially dlib)" && \
+    echo "=========================================="
+
+# Install opencv-python first (moderate size)
+RUN echo "Installing opencv-python..." && \
     pip install --no-cache-dir opencv-python==4.8.1.78 && \
+    echo "✓ opencv-python installed"
+
+# Install dlib (this is the slowest - 10-15 minutes)
+# dlib requires cmake and build tools (already installed above)
+# Set environment variables to optimize compilation
+ENV DLIB_USE_CUDA=0
+ENV DLIB_USE_BLAS=1
+RUN echo "Installing dlib (this will take 10-15 minutes)..." && \
+    echo "Using BLAS for faster compilation..." && \
     pip install --no-cache-dir dlib==19.24.2 && \
+    echo "✓ dlib installed successfully"
+
+# Install face-recognition last (depends on dlib)
+RUN echo "Installing face-recognition..." && \
     pip install --no-cache-dir face-recognition==1.3.0 && \
-    echo "Face recognition packages installed successfully!"
+    echo "✓ face-recognition installed"
+
+RUN echo "==========================================" && \
+    echo "✓ All face recognition packages installed!" && \
+    echo "=========================================="
 
 # Copy application code
 COPY . .

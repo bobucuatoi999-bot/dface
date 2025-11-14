@@ -17,19 +17,39 @@ If the internal DNS isn't resolving, you need to use the public URL instead.
 
 ## Solution
 
-### Step 1: Get the Public Database URL
+### ⚠️ IMPORTANT: Try Internal URL First (FREE)
+
+**Before using DATABASE_PUBLIC_URL (which may cost money), try the internal URL:**
+
+### Step 1: Try Internal DATABASE_URL First (FREE - Recommended)
+
+1. Go to Railway Dashboard → **Backend service** → **Variables** tab
+2. Find or create **`DATABASE_URL`** variable
+3. Set value to: `${{Postgres.DATABASE_URL}}`
+   - Replace `Postgres` with your actual PostgreSQL service name
+4. Save and wait 2-3 minutes for Railway's DNS to propagate
+5. Check logs - if connection works, you're done! ✅
+
+**Why this is better:**
+- ✅ **FREE** - No egress fees
+- ✅ **Faster** - Internal network connection
+- ✅ **More secure** - Not exposed publicly
+
+### Step 2: If Internal URL Doesn't Work, Use Public URL (Fallback)
+
+**Only use this if Step 1 doesn't work after waiting 2-3 minutes:**
 
 1. Go to Railway Dashboard → **Postgres service** → **Variables** tab
 2. Find **`DATABASE_PUBLIC_URL`** (or `POSTGRES_PUBLIC_URL`)
 3. Copy the entire value (looks like: `postgresql://user:pass@host.railway.app:port/db`)
 
-### Step 2: Update Backend Service Variable
+4. Go to Railway Dashboard → **Backend service** → **Variables** tab
+5. Find **`DATABASE_URL`** variable
+6. Click to edit it
+7. Replace the value with the **`DATABASE_PUBLIC_URL`** you copied
+8. Save
 
-1. Go to Railway Dashboard → **Backend service** → **Variables** tab
-2. Find **`DATABASE_URL`** variable
-3. Click to edit it
-4. Replace the value with the **`DATABASE_PUBLIC_URL`** you copied
-5. Save
+**⚠️ Note:** Using `DATABASE_PUBLIC_URL` may incur egress fees. See `DATABASE_URL_VS_PUBLIC_URL.md` for details.
 
 ### Step 3: Wait for Redeploy
 
@@ -40,15 +60,6 @@ Running database migrations...
 ✓ Database migrations completed successfully
 Starting uvicorn server...
 ```
-
-## Alternative: Use Railway's Variable Reference
-
-If Railway's variable reference works:
-
-1. Backend service → Variables
-2. Edit `DATABASE_URL`
-3. Set value to: `${{Postgres.DATABASE_PUBLIC_URL}}`
-   - Replace `Postgres` with your actual PostgreSQL service name
 
 ## Why This Happens
 
