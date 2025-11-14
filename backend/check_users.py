@@ -47,11 +47,28 @@ try:
             # Check for admin users
             admins = [u for u in users if u.role == UserRole.ADMIN]
             if admins:
-                print(f"✅ Found {len(admins)} admin user(s)")
+                print(f"✅ Found {len(admins)} admin user(s):")
+                for admin in admins:
+                    print(f"  - {admin.username} (Active: {admin.is_active})")
+                print("\n💡 Try logging in with one of these usernames!")
             else:
                 print("⚠️  No admin users found!")
                 print("\nTo create an admin user, run:")
                 print("  python scripts/create_admin.py")
+                print("\nOr the admin will be auto-created on next startup.")
+            
+            # Test password verification for admin users
+            if admins:
+                print("\n" + "=" * 60)
+                print("  Testing Password Verification")
+                print("=" * 60)
+                test_password = "admin123"
+                for admin in admins:
+                    if auth_service.verify_password(test_password, admin.hashed_password):
+                        print(f"✅ User '{admin.username}': Password 'admin123' is CORRECT")
+                    else:
+                        print(f"❌ User '{admin.username}': Password 'admin123' is INCORRECT")
+                        print(f"   (This user might have a different password)")
         
     except Exception as e:
         print(f"\n❌ Error: {e}")

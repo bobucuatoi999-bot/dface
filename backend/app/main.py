@@ -248,6 +248,41 @@ async def health_check():
     }
 
 
+@app.get("/debug/users")
+async def debug_users(db: Session = Depends(get_db)):
+    """
+    Debug endpoint to check users in database.
+    ⚠️ WARNING: This exposes user information. Remove in production!
+    """
+    try:
+        from app.models.auth import AuthUser, UserRole
+        
+        users = db.query(AuthUser).all()
+        users_info = []
+        for user in users:
+            users_info.append({
+                "id": user.id,
+                "username": user.username,
+                "email": user.email,
+                "role": user.role.value,
+                "is_active": user.is_active,
+                "created_at": str(user.created_at) if user.created_at else None,
+            })
+        
+        return {
+            "total_users": len(users_info),
+            "users": users_info,
+            "admin_count": len([u for u in users_info if u["role"] == "admin"])
+        }
+    except Exception as e:
+        logger.error(f"Error getting users: {e}", exc_info=True)
+        return {
+            "error": str(e),
+            "total_users": 0,
+            "users": []
+        }
+
+
 @app.websocket("/ws/recognize")
 async def websocket_recognize(websocket: WebSocket):
     """
