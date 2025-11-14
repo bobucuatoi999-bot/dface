@@ -18,21 +18,10 @@ logger = logging.getLogger(__name__)
 # Use bcrypt directly to avoid passlib initialization issues
 # The passlib CryptContext can have issues with bcrypt backend initialization
 # Using bcrypt directly is more reliable
-try:
-    import bcrypt
-    USE_BCRYPT_DIRECTLY = True
-    pwd_context = None
-    logger.info("Using bcrypt directly for password hashing")
-except ImportError:
-    # Fallback to passlib if bcrypt is not available
-    USE_BCRYPT_DIRECTLY = False
-    try:
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        logger.info("Using passlib CryptContext for password hashing")
-    except Exception as e:
-        logger.error(f"Failed to initialize password hashing: {e}")
-        pwd_context = None
-        USE_BCRYPT_DIRECTLY = False
+import bcrypt
+USE_BCRYPT_DIRECTLY = True
+pwd_context = None
+logger.info("Using bcrypt directly for password hashing (bypassing passlib)")
 
 
 class AuthService:
