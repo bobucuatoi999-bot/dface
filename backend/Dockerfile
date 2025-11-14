@@ -61,12 +61,31 @@ RUN echo "Installing opencv-python..." && \
 
 # Install dlib (this is the slowest - 10-15 minutes)
 # dlib requires cmake and build tools (already installed above)
-# Set environment variables to optimize compilation
+# Fix CMake compatibility: dlib 19.24.2 uses old pybind11 with incompatible CMake syntax
+# Solution: Patch pybind11 CMakeLists.txt to require CMake 3.10+ instead of 3.5
 ENV DLIB_USE_CUDA=0
 ENV DLIB_USE_BLAS=1
+
+# Download dlib source
+RUN echo "Downloading dlib source..." && \
+    pip download --no-deps --no-binary :all: dlib==19.24.2
+
+# Extract and patch dlib
+RUN DLIB_TAR=$(ls dlib-*.tar.gz | head -1) && \
+    echo "Extracting $DLIB_TAR..." && \
+    tar -xzf "$DLIB_TAR" && \
+    DLIB_DIR=$(ls -d dlib-* | head -1) && \
+    echo "Patching pybind11 CMakeLists.txt for CMake compatibility..." && \
+    find "$DLIB_DIR" -name "CMakeLists.txt" -path "*/pybind11/*" -exec sed -i 's/cmake_minimum_required(VERSION 3.5)/cmake_minimum_required(VERSION 3.10)/' {} \; && \
+    echo "✓ Patch applied" && \
+    rm -f "$DLIB_TAR"
+
+# Install patched dlib
 RUN echo "Installing dlib (this will take 10-15 minutes)..." && \
     echo "Using BLAS for faster compilation..." && \
-    pip install --no-cache-dir dlib==19.24.2 && \
+    DLIB_DIR=$(ls -d dlib-* | head -1) && \
+    pip install --no-cache-dir --no-build-isolation "$DLIB_DIR" && \
+    rm -rf "$DLIB_DIR" && \
     echo "✓ dlib installed successfully"
 
 # Install face-recognition last (depends on dlib)
