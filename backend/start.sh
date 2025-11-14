@@ -2,7 +2,8 @@
 # Startup script for Railway deployment
 # Checks for required environment variables before starting
 
-set -e
+# Don't exit on error immediately - we want to log errors first
+set +e
 
 echo "=========================================="
 echo "FaceStream Backend - Starting..."
@@ -40,7 +41,7 @@ if [ -z "$DATABASE_URL" ]; then
     echo "Container will exit. This is EXPECTED until DATABASE_URL is set."
     echo "After adding PostgreSQL, Railway will automatically redeploy."
     echo ""
-    sleep 5
+    sleep 10
     exit 1
 fi
 
@@ -49,10 +50,15 @@ echo ""
 
 # Run database migrations (allow to fail gracefully)
 echo "Running database migrations..."
-if alembic upgrade head; then
+MIGRATION_OUTPUT=$(alembic upgrade head 2>&1)
+MIGRATION_EXIT_CODE=$?
+
+if [ $MIGRATION_EXIT_CODE -eq 0 ]; then
     echo "✓ Database migrations completed successfully"
 else
-    echo "⚠ WARNING: Database migrations failed"
+    echo "⚠ WARNING: Database migrations failed (exit code: $MIGRATION_EXIT_CODE)"
+    echo "Migration output:"
+    echo "$MIGRATION_OUTPUT"
     echo ""
     echo "If you see 'could not translate host name' error:"
     echo "  → Your DATABASE_URL might be using internal Railway hostname"
@@ -65,5 +71,28 @@ echo ""
 # Start the application
 echo "Starting uvicorn server on port ${PORT:-8000}..."
 echo "=========================================="
-exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio
+echo ""
+
+# Check if Python can import the app
+echo "Verifying application can be imported..."
+if python -c "import app.main" 2>&1; then
+    echo "✓ Application import successful"
+else
+    IMPORT_ERROR=$(python -c "import app.main" 2>&1)
+    echo "❌ ERROR: Failed to import application"
+    echo "Error details:"
+    echo "$IMPORT_ERROR"
+    echo ""
+    echo "This usually means:"
+    echo "  - Missing Python dependencies"
+    echo "  - Syntax error in code"
+    echo "  - Import error in modules"
+    echo ""
+    echo "Attempting to start anyway (errors will be shown in uvicorn logs)..."
+fi
+echo ""
+
+# Start uvicorn with error handling
+echo "Starting uvicorn..."
+exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio --log-level info
 

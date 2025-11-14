@@ -6,17 +6,16 @@ FROM python:3.11-slim
 # Set working directory
 WORKDIR /app
 
-# Install system dependencies (optional - for face recognition if needed)
-# Note: These are large and may not be needed for auth-only deployments
-# Uncomment if you need face recognition features
-# RUN apt-get update && apt-get install -y \
-#     build-essential \
-#     cmake \
-#     libopenblas-dev \
-#     liblapack-dev \
-#     libx11-dev \
-#     libgtk-3-dev \
-#     && rm -rf /var/lib/apt/lists/*
+# Install system dependencies for face recognition
+# Required for compiling dlib and face-recognition packages
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    cmake \
+    libopenblas-dev \
+    liblapack-dev \
+    libx11-dev \
+    libgtk-3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Install core dependencies first (fast, required for app to run)
 # This ensures the app can start quickly even if optional packages fail
@@ -44,11 +43,13 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy requirements.txt for reference
 COPY requirements.txt .
 
-# Skip face recognition dependencies for faster builds
-# These packages (opencv-python, face-recognition, dlib) take 15-20+ minutes to compile
-# The app handles missing face recognition gracefully and runs in auth-only mode
-# To enable face recognition later, uncomment the line below:
-# RUN pip install --no-cache-dir opencv-python==4.8.1.78 face-recognition==1.3.0 dlib==19.24.2 || true
+# Install face recognition dependencies
+# These packages take 15-20+ minutes to compile but are required for live video recognition
+RUN echo "Installing face recognition packages (this may take 15-20 minutes)..." && \
+    pip install --no-cache-dir opencv-python==4.8.1.78 && \
+    pip install --no-cache-dir dlib==19.24.2 && \
+    pip install --no-cache-dir face-recognition==1.3.0 && \
+    echo "Face recognition packages installed successfully!"
 
 # Copy application code
 COPY . .

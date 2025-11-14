@@ -5,7 +5,8 @@
   },
   "deploy": {
     "startCommand": "/app/start.sh",
-    "restartPolicyType": "NEVER"
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
   }
 }
 
