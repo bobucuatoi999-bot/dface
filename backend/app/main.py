@@ -292,6 +292,74 @@ async def debug_users(db: Session = Depends(get_db)):
         }
 
 
+@app.post("/debug/create-admin")
+async def create_admin_endpoint(db: Session = Depends(get_db)):
+    """
+    Debug endpoint to create admin user if none exists.
+    ⚠️ WARNING: This allows creating admin without authentication. Remove in production!
+    """
+    try:
+        from app.models.auth import AuthUser, UserRole
+        from app.services.auth_service import AuthService
+        
+        # Check if admin exists
+        existing_admin = db.query(AuthUser).filter(AuthUser.role == UserRole.ADMIN).first()
+        
+        if existing_admin:
+            return {
+                "status": "exists",
+                "message": f"Admin user already exists: {existing_admin.username}",
+                "username": existing_admin.username,
+                "id": existing_admin.id
+            }
+        
+        # Create admin user
+        auth_service = AuthService()
+        username = os.getenv("ADMIN_USERNAME", "admin")
+        password = os.getenv("ADMIN_PASSWORD", "admin123")
+        email = os.getenv("ADMIN_EMAIL", "admin@facestream.local")
+        
+        logger.info(f"Creating admin user via endpoint: {username}")
+        
+        admin = auth_service.create_user(
+            db=db,
+            username=username,
+            password=password,
+            email=email,
+            role=UserRole.ADMIN
+        )
+        
+        # Verify user was created
+        db.refresh(admin)
+        verify_user = db.query(AuthUser).filter(AuthUser.username == username).first()
+        
+        if verify_user and auth_service.verify_password(password, verify_user.hashed_password):
+            logger.info(f"Admin user created successfully: {username}")
+            return {
+                "status": "created",
+                "message": f"Admin user created successfully",
+                "username": username,
+                "password": password,
+                "id": admin.id,
+                "verified": True
+            }
+        else:
+            logger.error(f"Admin user creation failed verification")
+            return {
+                "status": "error",
+                "message": "Admin user creation failed verification",
+                "username": username
+            }
+            
+    except Exception as e:
+        logger.error(f"Error creating admin: {e}", exc_info=True)
+        return {
+            "status": "error",
+            "message": f"Error creating admin: {str(e)}",
+            "error": str(e)
+        }
+
+
 @app.websocket("/ws/recognize")
 async def websocket_recognize(websocket: WebSocket):
     """

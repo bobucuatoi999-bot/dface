@@ -45,7 +45,7 @@ try:
                 role=UserRole.ADMIN
             )
             
-            db.commit()
+            # Note: auth_service.create_user() already commits, but let's verify
             db.refresh(admin)
             print(f"✅ Auto-created admin user: {username}", file=sys.stderr)
             print(f"   Password: {password}", file=sys.stderr)
@@ -55,9 +55,7 @@ try:
             print(f"   Role: {admin.role.value}", file=sys.stderr)
             print(f"   ⚠️  Please change the password after first login!", file=sys.stderr)
             
-            # Verify the user was created correctly - query again to be sure
-            db.close()
-            db = SessionLocal()
+            # Verify the user was created correctly - use same session
             verify_user = db.query(AuthUser).filter(AuthUser.username == username).first()
             if verify_user:
                 print(f"✅ Verified: User '{username}' exists in database (ID: {verify_user.id})", file=sys.stderr)
@@ -65,12 +63,15 @@ try:
                 if auth_service.verify_password(password, verify_user.hashed_password):
                     print(f"✅ Verified: Password verification works correctly", file=sys.stderr)
                     print(f"✅ Admin user is ready to use: username='{username}', password='{password}'", file=sys.stderr)
+                    print(f"✅ SUCCESS: Admin user created and verified!", file=sys.stderr)
                 else:
                     print(f"❌ ERROR: Password verification FAILED!", file=sys.stderr)
                     print(f"   This means the password hash is incorrect!", file=sys.stderr)
+                    sys.exit(1)  # Fail loudly
             else:
                 print(f"❌ ERROR: User was not found after creation!", file=sys.stderr)
                 print(f"   Database transaction may have failed!", file=sys.stderr)
+                sys.exit(1)  # Fail loudly
             
     except Exception as e:
         # Log error details
