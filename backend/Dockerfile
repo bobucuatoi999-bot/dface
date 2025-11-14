@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y \
     libx11-dev \
     libgtk-3-dev \
     pkg-config \
+    libssl-dev \
+    wget \
     && rm -rf /var/lib/apt/lists/*
 
 # Install core dependencies first (fast, required for app to run)
@@ -66,9 +68,10 @@ RUN echo "Installing opencv-python..." && \
 ENV DLIB_USE_CUDA=0
 ENV DLIB_USE_BLAS=1
 
-# Download dlib source
-RUN echo "Downloading dlib source..." && \
-    pip download --no-deps --no-binary :all: dlib==19.24.2
+# Download dlib source directly from PyPI (avoid pip download build dependencies)
+RUN echo "Downloading dlib source from PyPI..." && \
+    wget -q https://files.pythonhosted.org/packages/source/d/dlib/dlib-19.24.2.tar.gz && \
+    echo "✓ dlib source downloaded"
 
 # Extract and patch dlib
 RUN DLIB_TAR=$(ls dlib-*.tar.gz | head -1) && \
