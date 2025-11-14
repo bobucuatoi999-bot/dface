@@ -99,11 +99,37 @@
   background: #5a6268;
 }
 
+.btn-danger {
+  background: #ff4444;
+  color: white;
+  border: none;
+  padding: 12px 24px;
+  border-radius: 8px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.3s;
+}
+
+.btn-danger:hover {
+  background: #cc0000;
+}
+
+.btn-danger:disabled {
+  background: #ccc;
+  cursor: not-allowed;
+}
+
 .btn-submit {
   width: 100%;
   padding: 16px;
   font-size: 18px;
   margin-top: 24px;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
 }
 
 .error-message {
