@@ -12,8 +12,15 @@ import sys
 # Add parent directory to path to import app modules
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from app.database import Base
+# Check DATABASE_URL before importing database module (which would exit if missing)
 from app.config import settings
+
+if not settings.DATABASE_URL:
+    print("WARNING: DATABASE_URL not set. Skipping database migrations.", file=sys.stderr)
+    print("Please set DATABASE_URL in Railway environment variables.", file=sys.stderr)
+    sys.exit(0)  # Exit gracefully, don't crash
+
+from app.database import Base
 from app.models import User, FaceEmbedding, RecognitionLog  # Import all models
 
 # this is the Alembic Config object, which provides

@@ -46,10 +46,13 @@ RUN pip install --no-cache-dir \
 # Copy application code
 COPY . .
 
+# Make startup script executable
+RUN chmod +x /app/start.sh
+
 # Expose port (Railway will set PORT env var)
 EXPOSE ${PORT:-8000}
 
 # Run migrations and start server
 # Railway sets PORT environment variable automatically
-CMD ["sh", "-c", "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio"]
+CMD ["/app/start.sh"]
 
