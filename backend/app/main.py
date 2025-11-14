@@ -302,7 +302,6 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
     try:
         from app.models.auth import AuthUser, UserRole
         from app.services.auth_service import AuthService
-        from passlib.context import CryptContext
         
         logger.info("=== CREATE ADMIN ENDPOINT CALLED ===")
         
@@ -319,7 +318,7 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
                 "id": existing_admin.id
             }
         
-        # Create admin user - do it directly to ensure it works
+        # Create admin user - use AuthService to avoid bcrypt initialization issues
         username = os.getenv("ADMIN_USERNAME", "admin")
         password = os.getenv("ADMIN_PASSWORD", "admin123")
         email = os.getenv("ADMIN_EMAIL", "admin@facestream.local")
@@ -328,9 +327,9 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
         logger.info(f"Email: {email}")
         logger.info(f"Role: admin")
         
-        # Hash password directly
-        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-        hashed_password = pwd_context.hash(password)
+        # Use AuthService to hash password (avoids bcrypt initialization issues)
+        auth_service = AuthService()
+        hashed_password = auth_service.get_password_hash(password)
         logger.info(f"Password hashed: {hashed_password[:20]}...")
         
         # Create user directly
@@ -373,8 +372,7 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
                 "username": username
             }
         
-        # Verify password
-        auth_service = AuthService()
+        # Verify password (auth_service already initialized above)
         password_verified = auth_service.verify_password(password, verify_user.hashed_password)
         logger.info(f"Password verification: {password_verified}")
         
