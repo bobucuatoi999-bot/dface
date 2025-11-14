@@ -39,6 +39,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
     email-validator>=2.0.0 \
     python-jose[cryptography]==3.3.0 \
     passlib[bcrypt]==1.7.4 \
+    bcrypt>=4.0.0 \
     python-dateutil==2.8.2 \
     redis>=5.0.0 \
     hiredis>=2.2.3 \
