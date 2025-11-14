@@ -93,12 +93,20 @@ app.add_middleware(
 logger.info(f"CORS configured with allowed origins: {allowed_origins}")
 
 # Global exception handler to ensure CORS headers are always sent
+# Note: This only catches non-HTTPException errors (HTTPException is handled by FastAPI)
+from fastapi import HTTPException as FastAPIHTTPException
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """
     Global exception handler to ensure CORS headers are always sent,
     even when unhandled exceptions occur.
+    Excludes HTTPException which FastAPI handles properly.
     """
+    # Don't handle HTTPException - FastAPI handles those with CORS middleware
+    if isinstance(exc, FastAPIHTTPException):
+        raise exc
+    
     logger.error(f"Unhandled exception: {exc}", exc_info=True)
     
     # Get the origin from request headers
