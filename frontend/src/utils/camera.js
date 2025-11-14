@@ -62,114 +62,204 @@ export const startVideoRecording = (videoElement, options = {}) => {
     mimeType = 'video/webm;codecs=vp8,opus'
   } = options
 
-  try {
-    const stream = videoElement.srcObject
-    if (!stream) {
-      throw new Error('No video stream available')
-    }
-
-    // Check if MediaRecorder supports the requested mimeType
-    const supportedTypes = [
-      'video/webm;codecs=vp8,opus',
-      'video/webm;codecs=vp9,opus',
-      'video/webm;codecs=h264,opus',
-      'video/webm',
-      'video/mp4'
-    ]
-    
-    let selectedMimeType = mimeType
-    let isSupported = MediaRecorder.isTypeSupported(mimeType)
-    
-    if (!isSupported) {
-      console.warn(`MIME type ${mimeType} not supported, trying alternatives...`)
-      for (const type of supportedTypes) {
-        if (MediaRecorder.isTypeSupported(type)) {
-          selectedMimeType = type
-          isSupported = true
-          console.log(`Using alternative MIME type: ${type}`)
-          break
-        }
-      }
-    }
-    
-    if (!isSupported) {
-      throw new Error('No supported video format found. Please use a modern browser.')
-    }
-
-    const mediaRecorder = new MediaRecorder(stream, { 
-      mimeType: selectedMimeType,
-      videoBitsPerSecond: 2500000 // 2.5 Mbps for better quality
-    })
-    const chunks = []
-    let stoppedManually = false
-
-    mediaRecorder.ondataavailable = (event) => {
-      if (event.data && event.data.size > 0) {
-        chunks.push(event.data)
-        console.log(`Received chunk: ${event.data.size} bytes (total: ${chunks.length} chunks)`)
-      }
-    }
-
-    const promise = new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        if (mediaRecorder.state === 'recording') {
-          stoppedManually = true
-          mediaRecorder.stop()
-        }
-      }, duration)
-
-      mediaRecorder.onstop = () => {
-        clearTimeout(timeout)
-        
-        // Validate chunks
-        if (chunks.length === 0) {
-          reject(new Error('No video data recorded. Please try again.'))
+  return new Promise((resolve, reject) => {
+    // First, ensure video element is ready
+    const checkVideoReady = () => {
+      return new Promise((resolveCheck) => {
+        if (!videoElement) {
+          reject(new Error('Video element is not available'))
           return
         }
 
-        const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0)
-        console.log(`Recording stopped. Total chunks: ${chunks.length}, Total size: ${totalSize} bytes`)
-        
-        // Validate minimum size (at least 1KB for a valid video)
-        if (totalSize < 1024) {
-          reject(new Error(`Video file is too small (${totalSize} bytes). Recording may have failed.`))
+        const stream = videoElement.srcObject
+        if (!stream) {
+          reject(new Error('No video stream available. Please start the camera first.'))
           return
         }
 
-        const blob = new Blob(chunks, { type: selectedMimeType })
+        // Check if stream has active tracks
+        const videoTracks = stream.getVideoTracks()
+        const audioTracks = stream.getAudioTracks()
         
-        // Additional validation: check blob size matches
-        if (blob.size !== totalSize) {
-          console.warn(`Blob size mismatch: expected ${totalSize}, got ${blob.size}`)
-        }
-
-        // Validate blob is not empty
-        if (blob.size === 0) {
-          reject(new Error('Video blob is empty. Recording may have failed.'))
+        if (videoTracks.length === 0) {
+          reject(new Error('No video tracks in stream. Please check your camera.'))
           return
         }
 
-        console.log(`✅ Video recorded successfully: ${blob.size} bytes, type: ${selectedMimeType}`)
-        resolve(blob)
+        const activeVideoTrack = videoTracks.find(track => track.readyState === 'live')
+        if (!activeVideoTrack) {
+          reject(new Error('Video track is not active. Please wait for camera to initialize.'))
+          return
+        }
+
+        // Wait for video element to be playing (if it's a video element)
+        if (videoElement.tagName === 'VIDEO') {
+          if (videoElement.readyState >= 2) { // HAVE_CURRENT_DATA or higher
+            console.log('Video element is ready, readyState:', videoElement.readyState)
+            resolveCheck()
+          } else {
+            const onCanPlay = () => {
+              console.log('Video element can play now')
+              videoElement.removeEventListener('canplay', onCanPlay)
+              resolveCheck()
+            }
+            videoElement.addEventListener('canplay', onCanPlay)
+            
+            // Timeout after 3 seconds
+            setTimeout(() => {
+              videoElement.removeEventListener('canplay', onCanPlay)
+              console.warn('Video ready check timeout, proceeding anyway')
+              resolveCheck()
+            }, 3000)
+          }
+        } else {
+          resolveCheck()
+        }
+      })
+    }
+
+    checkVideoReady().then(() => {
+      try {
+        const stream = videoElement.srcObject
+
+        // Check if MediaRecorder supports the requested mimeType
+        const supportedTypes = [
+          'video/webm;codecs=vp8,opus',
+          'video/webm;codecs=vp9,opus',
+          'video/webm;codecs=h264,opus',
+          'video/webm',
+          'video/mp4'
+        ]
+        
+        let selectedMimeType = mimeType
+        let isSupported = MediaRecorder.isTypeSupported(mimeType)
+        
+        if (!isSupported) {
+          console.warn(`MIME type ${mimeType} not supported, trying alternatives...`)
+          for (const type of supportedTypes) {
+            if (MediaRecorder.isTypeSupported(type)) {
+              selectedMimeType = type
+              isSupported = true
+              console.log(`Using alternative MIME type: ${type}`)
+              break
+            }
+          }
+        }
+        
+        if (!isSupported) {
+          throw new Error('No supported video format found. Please use a modern browser.')
+        }
+
+        const mediaRecorder = new MediaRecorder(stream, { 
+          mimeType: selectedMimeType,
+          videoBitsPerSecond: 2500000 // 2.5 Mbps for better quality
+        })
+        const chunks = []
+
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            chunks.push(event.data)
+            console.log(`Received chunk: ${event.data.size} bytes (total: ${chunks.length} chunks, ${chunks.reduce((sum, c) => sum + c.size, 0)} bytes)`)
+          } else {
+            console.warn('Received empty chunk')
+          }
+        }
+
+        const promise = new Promise((resolveRecord, rejectRecord) => {
+          let hasStopped = false
+          
+          const timeout = setTimeout(() => {
+            if (mediaRecorder.state === 'recording') {
+              console.log('Auto-stopping recording after', duration, 'ms')
+              mediaRecorder.stop()
+            }
+          }, duration)
+
+          mediaRecorder.onstop = () => {
+            if (hasStopped) {
+              console.warn('onstop called multiple times')
+              return
+            }
+            hasStopped = true
+            clearTimeout(timeout)
+            
+            console.log(`Recording stopped. State: ${mediaRecorder.state}, Chunks: ${chunks.length}`)
+            
+            // Request any remaining data
+            if (mediaRecorder.state !== 'inactive') {
+              mediaRecorder.requestData()
+            }
+            
+            // Give a small delay for any final data events
+            setTimeout(() => {
+              // Validate chunks
+              if (chunks.length === 0) {
+                rejectRecord(new Error('No video data recorded. Please try again and ensure your camera is working.'))
+                return
+              }
+
+              const totalSize = chunks.reduce((sum, chunk) => sum + chunk.size, 0)
+              console.log(`Recording complete. Total chunks: ${chunks.length}, Total size: ${totalSize} bytes`)
+              
+              // Validate minimum size (at least 5KB for a valid 7-second video)
+              if (totalSize < 5120) {
+                rejectRecord(new Error(`Video file is too small (${totalSize} bytes). Recording may have failed. Please check your camera and try again.`))
+                return
+              }
+
+              const blob = new Blob(chunks, { type: selectedMimeType })
+              
+              // Additional validation: check blob size matches
+              if (blob.size !== totalSize) {
+                console.warn(`Blob size mismatch: expected ${totalSize}, got ${blob.size}`)
+              }
+
+              // Validate blob is not empty
+              if (blob.size === 0) {
+                rejectRecord(new Error('Video blob is empty. Recording may have failed.'))
+                return
+              }
+
+              console.log(`✅ Video recorded successfully: ${blob.size} bytes, type: ${selectedMimeType}`)
+              resolveRecord(blob)
+            }, 200)
+          }
+
+          mediaRecorder.onerror = (error) => {
+            clearTimeout(timeout)
+            console.error('MediaRecorder error:', error)
+            rejectRecord(new Error(`Recording error: ${error.error?.message || error.name || 'Unknown error'}`))
+          }
+
+          // Start recording with timeslice to ensure data is available
+          // Timeslice of 100ms means ondataavailable fires every 100ms
+          try {
+            mediaRecorder.start(100)
+            console.log(`Started recording with MIME type: ${selectedMimeType}, state: ${mediaRecorder.state}`)
+            
+            // Verify recording actually started
+            setTimeout(() => {
+              if (mediaRecorder.state === 'recording') {
+                console.log('✅ Recording confirmed active')
+              } else {
+                console.error('❌ Recording failed to start. State:', mediaRecorder.state)
+                rejectRecord(new Error(`Recording failed to start. State: ${mediaRecorder.state}`))
+              }
+            }, 500)
+          } catch (startError) {
+            clearTimeout(timeout)
+            console.error('Error starting MediaRecorder:', startError)
+            rejectRecord(new Error(`Failed to start recording: ${startError.message || 'Unknown error'}`))
+          }
+        })
+
+        resolve({ recorder: mediaRecorder, promise, mimeType: selectedMimeType })
+      } catch (error) {
+        console.error('Error setting up video recording:', error)
+        reject(error)
       }
-
-      mediaRecorder.onerror = (error) => {
-        clearTimeout(timeout)
-        console.error('MediaRecorder error:', error)
-        reject(new Error(`Recording error: ${error.error?.message || 'Unknown error'}`))
-      }
-
-      // Start recording with timeslice to ensure data is available
-      // Timeslice of 100ms means ondataavailable fires every 100ms
-      mediaRecorder.start(100)
-      console.log(`Started recording with MIME type: ${selectedMimeType}`)
-    })
-
-    return { recorder: mediaRecorder, promise, mimeType: selectedMimeType }
-  } catch (error) {
-    console.error('Error starting video recording:', error)
-    throw error
-  }
+    }).catch(reject)
+  })
 }
 
 export const videoBlobToBase64 = (blob) => {

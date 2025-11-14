@@ -156,16 +156,37 @@ function RegisterUserPage() {
     try {
       setError('')
       setValidationInfo(null)
+      
+      // Validate video element and stream before starting
+      if (!videoRef.current) {
+        setError('Video element is not available')
+        return
+      }
+      
+      if (!videoRef.current.srcObject) {
+        setError('Camera is not started. Please start the camera first.')
+        return
+      }
+      
+      const stream = videoRef.current.srcObject
+      const videoTracks = stream.getVideoTracks()
+      if (videoTracks.length === 0 || videoTracks[0].readyState !== 'live') {
+        setError('Camera is not ready. Please wait a moment and try again.')
+        return
+      }
+      
       setIsRecording(true)
       setRecordingTime(0)
       setVideoDuration(0)
 
       // Start video recording (7 seconds duration)
-      const { recorder, promise } = startVideoRecording(videoRef.current, {
+      // startVideoRecording now returns a Promise, so we need to await it
+      const result = await startVideoRecording(videoRef.current, {
         duration: 7000,
         mimeType: 'video/webm;codecs=vp8,opus'
       })
       
+      const { recorder, promise } = result
       recorderRef.current = recorder
 
       // Start recording timer for UI feedback
