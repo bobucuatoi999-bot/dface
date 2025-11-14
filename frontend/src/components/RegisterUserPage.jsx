@@ -235,6 +235,18 @@ function RegisterUserPage() {
         clearInterval(timerRef.current)
         timerRef.current = null
       }
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current)
+        detectionIntervalRef.current = null
+      }
+      // Clear canvas
+      const canvas = canvasRef.current
+      if (canvas) {
+        const ctx = canvas.getContext('2d')
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
+      }
+      setFacesDetected([])
+      setFaceDetectionStatus(null)
     }
   }
 
@@ -251,6 +263,19 @@ function RegisterUserPage() {
       clearInterval(timerRef.current)
       timerRef.current = null
     }
+    // Stop face detection
+    if (detectionIntervalRef.current) {
+      clearInterval(detectionIntervalRef.current)
+      detectionIntervalRef.current = null
+    }
+    // Clear canvas
+    const canvas = canvasRef.current
+    if (canvas) {
+      const ctx = canvas.getContext('2d')
+      ctx.clearRect(0, 0, canvas.width, canvas.height)
+    }
+    setFacesDetected([])
+    setFaceDetectionStatus(null)
   }
 
   const handleSubmit = async (e) => {
