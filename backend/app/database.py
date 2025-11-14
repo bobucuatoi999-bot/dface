@@ -32,9 +32,23 @@ if not settings.DATABASE_URL:
     print(error_msg, file=sys.stderr)
     sys.exit(1)
 
+# Trim whitespace from DATABASE_URL to prevent connection errors
+# (Safety measure in case Railway or user adds trailing spaces)
+database_url = settings.DATABASE_URL.strip()
+
+# Log database URL (without password) for debugging
+if '@' in database_url:
+    # Mask password in logs
+    parts = database_url.split('@')
+    if len(parts) == 2:
+        masked_url = parts[0].split(':')[0] + ':***@' + parts[1]
+        print(f"Connecting to database: {masked_url}", file=sys.stderr)
+else:
+    print(f"Connecting to database: {database_url}", file=sys.stderr)
+
 # Create database engine
 engine = create_engine(
-    settings.DATABASE_URL,
+    database_url,  # Use trimmed URL
     pool_pre_ping=True,  # Verify connections before using
     pool_size=10,  # Connection pool size
     max_overflow=20,  # Max connections beyond pool_size
