@@ -207,16 +207,39 @@ export const startVideoRecording = (videoElement, options = {}) => {
                 return
               }
 
+              // Create blob and validate immediately
               const blob = new Blob(chunks, { type: selectedMimeType })
+              
+              console.log(`Creating blob from ${chunks.length} chunks...`)
+              console.log(`Chunk sizes:`, chunks.map(c => c.size))
+              console.log(`Total chunks size: ${totalSize} bytes`)
+              console.log(`Blob size: ${blob.size} bytes`)
+              console.log(`Blob type: ${blob.type}`)
               
               // Additional validation: check blob size matches
               if (blob.size !== totalSize) {
                 console.warn(`Blob size mismatch: expected ${totalSize}, got ${blob.size}`)
+                // If size mismatch is significant, reject
+                if (Math.abs(blob.size - totalSize) > 100) {
+                  rejectRecord(new Error(`Blob size mismatch: expected ${totalSize} bytes, got ${blob.size} bytes. Recording may have failed.`))
+                  return
+                }
               }
 
               // Validate blob is not empty
               if (blob.size === 0) {
                 rejectRecord(new Error('Video blob is empty. Recording may have failed.'))
+                return
+              }
+              
+              // Validate blob type
+              if (!blob.type || !blob.type.startsWith('video/')) {
+                console.warn(`Unexpected blob type: ${blob.type}, expected video/*`)
+              }
+              
+              // Validate minimum size again (safety check)
+              if (blob.size < 5120) {
+                rejectRecord(new Error(`Video blob is too small (${blob.size} bytes). Minimum 5KB required for a 7-second video.`))
                 return
               }
 
@@ -241,6 +264,15 @@ export const startVideoRecording = (videoElement, options = {}) => {
             setTimeout(() => {
               if (mediaRecorder.state === 'recording') {
                 console.log('✅ Recording confirmed active')
+                
+                // Check if chunks are being received
+                if (chunks.length === 0) {
+                  console.warn('⚠️ No chunks received after 500ms. This might indicate a recording issue.')
+                  // Don't reject yet, as chunks might arrive later with timeslice
+                } else {
+                  const currentSize = chunks.reduce((sum, c) => sum + c.size, 0)
+                  console.log(`✅ ${chunks.length} chunks received so far (${currentSize} bytes)`)
+                }
               } else {
                 console.error('❌ Recording failed to start. State:', mediaRecorder.state)
                 rejectRecord(new Error(`Recording failed to start. State: ${mediaRecorder.state}`))
@@ -282,35 +314,39 @@ export const videoBlobToBase64 = (blob) => {
 
     console.log(`Converting video blob to base64: ${blob.size} bytes, type: ${blob.type}`)
 
+    // Use ArrayBuffer instead of DataURL for more reliable conversion
     const reader = new FileReader()
     reader.onloadend = () => {
       try {
-        const base64String = reader.result
+        const arrayBuffer = reader.result
         
-        if (!base64String) {
-          reject(new Error('Failed to read video blob'))
+        if (!arrayBuffer || arrayBuffer.byteLength === 0) {
+          reject(new Error('Failed to read video blob: ArrayBuffer is empty'))
           return
         }
         
-        // Remove data URL prefix (e.g., "data:video/webm;base64,")
-        let base64 = base64String
-        if (base64String.includes(',')) {
-          base64 = base64String.split(',')[1]
+        console.log(`Read ArrayBuffer: ${arrayBuffer.byteLength} bytes`)
+        
+        // Convert ArrayBuffer to base64
+        const bytes = new Uint8Array(arrayBuffer)
+        let binary = ''
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i])
         }
         
-        // Clean base64 string: remove whitespace, newlines, and any non-base64 characters
-        // Base64 only contains: A-Z, a-z, 0-9, +, /, and = (for padding)
-        base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '')
+        // Encode to base64
+        const base64 = btoa(binary)
         
-        // Ensure it's not empty
-        if (!base64 || base64.length === 0) {
-          reject(new Error('Empty or invalid base64 string after cleaning'))
-          return
-        }
-
+        console.log(`Base64 encoded: ${base64.length} characters`)
+        
         // Validate base64 string length (should be at least 1KB in base64 = ~750 bytes)
-        if (base64.length < 1000) {
-          reject(new Error(`Base64 string too short (${base64.length} chars). Video may be corrupted.`))
+        // Base64 is ~33% larger than original binary, so 1KB blob = ~1.3KB base64
+        const expectedMinLength = Math.floor(blob.size * 1.3)
+        if (base64.length < Math.min(1000, expectedMinLength)) {
+          console.error(`Base64 string too short: ${base64.length} chars (expected at least ${Math.min(1000, expectedMinLength)}).`)
+          console.error(`Blob size: ${blob.size} bytes, type: ${blob.type}`)
+          console.error(`First 100 chars of base64: ${base64.substring(0, 100)}`)
+          reject(new Error(`Base64 string too short (${base64.length} chars). Video may be corrupted or recording failed.`))
           return
         }
 
@@ -318,20 +354,33 @@ export const videoBlobToBase64 = (blob) => {
         resolve(base64)
       } catch (error) {
         console.error('Error processing base64 string:', error)
-        reject(error)
+        console.error('Error details:', {
+          message: error.message,
+          stack: error.stack,
+          blobSize: blob.size,
+          blobType: blob.type
+        })
+        reject(new Error(`Failed to convert blob to base64: ${error.message || 'Unknown error'}`))
       }
     }
     reader.onerror = (error) => {
       console.error('FileReader error:', error)
+      console.error('Error details:', {
+        blobSize: blob.size,
+        blobType: blob.type,
+        error: error
+      })
       reject(new Error(`Failed to read video blob: ${error.message || 'Unknown error'}`))
     }
     reader.onprogress = (event) => {
       if (event.lengthComputable) {
         const percent = (event.loaded / event.total) * 100
-        console.log(`Reading video blob: ${percent.toFixed(1)}%`)
+        console.log(`Reading video blob: ${percent.toFixed(1)}% (${event.loaded}/${event.total} bytes)`)
       }
     }
-    reader.readAsDataURL(blob)
+    
+    // Read as ArrayBuffer instead of DataURL for more reliable conversion
+    reader.readAsArrayBuffer(blob)
   })
 }
 
