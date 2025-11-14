@@ -432,5 +432,6 @@ if __name__ == "__main__":
         host=settings.HOST,
         port=settings.PORT,
         reload=settings.DEBUG,
+        loop="asyncio",  # Use asyncio instead of uvloop for better compatibility
     )
 

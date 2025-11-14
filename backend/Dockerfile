@@ -51,5 +51,5 @@ EXPOSE ${PORT:-8000}
 
 # Run migrations and start server
 # Railway sets PORT environment variable automatically
-CMD ["sh", "-c", "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "alembic upgrade head || true && uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio"]
 
