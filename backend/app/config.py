@@ -26,6 +26,13 @@ class Settings(BaseSettings):
         description="PostgreSQL database connection URL (required for production)"
     )
     
+    def __init__(self, **kwargs):
+        """Initialize settings and trim DATABASE_URL if present."""
+        super().__init__(**kwargs)
+        # Trim whitespace from DATABASE_URL to prevent connection errors
+        if self.DATABASE_URL:
+            self.DATABASE_URL = self.DATABASE_URL.strip()
+    
     # WebSocket Settings
     WS_MAX_CONNECTIONS: int = Field(
         default=100,
