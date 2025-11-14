@@ -7,6 +7,7 @@ import numpy as np
 import cv2
 import base64
 import io
+import re
 from typing import List, Tuple, Optional, Dict
 from PIL import Image
 import logging
