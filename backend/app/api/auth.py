@@ -100,14 +100,49 @@ async def login(
     Then include the token in Authorization header: Bearer <token>
     """
     try:
-        user = auth_service.authenticate_user(db, form_data.username, form_data.password)
+        # Log login attempt (without password)
+        logger.info(f"Login attempt for username: '{form_data.username}'")
+        
+        # Try to find user (case-insensitive username lookup)
+        user = db.query(AuthUser).filter(
+            AuthUser.username.ilike(form_data.username.strip())
+        ).first()
         
         if not user:
+            logger.warning(f"User not found: '{form_data.username}'")
+            # Log all existing usernames for debugging
+            all_users = db.query(AuthUser).all()
+            if all_users:
+                usernames = [u.username for u in all_users]
+                logger.info(f"Existing usernames in database: {usernames}")
+            else:
+                logger.warning("No users found in database!")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Incorrect username or password",
                 headers={"WWW-Authenticate": "Bearer"},
             )
+        
+        # Check if user is active
+        if not user.is_active:
+            logger.warning(f"User '{user.username}' is not active")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        # Verify password
+        logger.debug(f"Verifying password for user: '{user.username}'")
+        if not auth_service.verify_password(form_data.password, user.hashed_password):
+            logger.warning(f"Password verification failed for user: '{user.username}'")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        logger.info(f"Login successful for user: '{user.username}' (role: {user.role.value})")
         
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         access_token = auth_service.create_access_token(

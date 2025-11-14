@@ -46,22 +46,31 @@ try:
             )
             
             db.commit()
+            db.refresh(admin)
             print(f"✅ Auto-created admin user: {username}", file=sys.stderr)
             print(f"   Password: {password}", file=sys.stderr)
             print(f"   Email: {email}", file=sys.stderr)
+            print(f"   ID: {admin.id}", file=sys.stderr)
+            print(f"   Active: {admin.is_active}", file=sys.stderr)
+            print(f"   Role: {admin.role.value}", file=sys.stderr)
             print(f"   ⚠️  Please change the password after first login!", file=sys.stderr)
             
-            # Verify the user was created correctly
+            # Verify the user was created correctly - query again to be sure
+            db.close()
+            db = SessionLocal()
             verify_user = db.query(AuthUser).filter(AuthUser.username == username).first()
             if verify_user:
-                print(f"✅ Verified: User '{username}' exists in database", file=sys.stderr)
+                print(f"✅ Verified: User '{username}' exists in database (ID: {verify_user.id})", file=sys.stderr)
                 # Test password verification
                 if auth_service.verify_password(password, verify_user.hashed_password):
                     print(f"✅ Verified: Password verification works correctly", file=sys.stderr)
+                    print(f"✅ Admin user is ready to use: username='{username}', password='{password}'", file=sys.stderr)
                 else:
                     print(f"❌ ERROR: Password verification FAILED!", file=sys.stderr)
+                    print(f"   This means the password hash is incorrect!", file=sys.stderr)
             else:
                 print(f"❌ ERROR: User was not found after creation!", file=sys.stderr)
+                print(f"   Database transaction may have failed!", file=sys.stderr)
             
     except Exception as e:
         # Log error details
