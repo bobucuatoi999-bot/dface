@@ -99,22 +99,34 @@ async def login(
     Use this to authenticate and get an access token.
     Then include the token in Authorization header: Bearer <token>
     """
-    user = auth_service.authenticate_user(db, form_data.username, form_data.password)
-    
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Incorrect username or password",
-            headers={"WWW-Authenticate": "Bearer"},
+    try:
+        user = auth_service.authenticate_user(db, form_data.username, form_data.password)
+        
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Incorrect username or password",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+        
+        access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+        access_token = auth_service.create_access_token(
+            data={"sub": user.username, "role": user.role.value},
+            expires_delta=access_token_expires
         )
-    
-    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
-    access_token = auth_service.create_access_token(
-        data={"sub": user.username, "role": user.role.value},
-        expires_delta=access_token_expires
-    )
-    
-    return {"access_token": access_token, "token_type": "bearer"}
+        
+        return {"access_token": access_token, "token_type": "bearer"}
+    except HTTPException:
+        # Re-raise HTTP exceptions (they already have proper status codes)
+        raise
+    except Exception as e:
+        # Log the error for debugging
+        logger.error(f"Login error: {e}", exc_info=True)
+        # Re-raise as HTTPException so FastAPI can add CORS headers
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Internal server error during login: {str(e)}"
+        )
 
 
 @router.get("/me", response_model=UserInfo)

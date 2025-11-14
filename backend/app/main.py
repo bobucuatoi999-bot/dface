@@ -5,8 +5,11 @@ Sets up the API server with WebSocket support.
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from contextlib import asynccontextmanager
 import logging
+import traceback
 
 from app.config import settings
 
@@ -85,6 +88,58 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Log CORS configuration
+logger.info(f"CORS configured with allowed origins: {allowed_origins}")
+
+# Global exception handler to ensure CORS headers are always sent
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """
+    Global exception handler to ensure CORS headers are always sent,
+    even when unhandled exceptions occur.
+    """
+    logger.error(f"Unhandled exception: {exc}", exc_info=True)
+    
+    # Get the origin from request headers
+    origin = request.headers.get("origin")
+    
+    # Check if origin is allowed
+    if origin and (origin in allowed_origins or "*" in allowed_origins):
+        headers = {"Access-Control-Allow-Origin": origin}
+    elif "*" in allowed_origins:
+        headers = {"Access-Control-Allow-Origin": "*"}
+    else:
+        headers = {}
+    
+    return JSONResponse(
+        status_code=500,
+        content={
+            "error": "INTERNAL_SERVER_ERROR",
+            "message": "An internal server error occurred",
+            "details": {"exception_type": type(exc).__name__}
+        },
+        headers=headers
+    )
+
+# Handle validation errors with CORS headers
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Handle validation errors with CORS headers."""
+    origin = request.headers.get("origin")
+    
+    if origin and (origin in allowed_origins or "*" in allowed_origins):
+        headers = {"Access-Control-Allow-Origin": origin}
+    elif "*" in allowed_origins:
+        headers = {"Access-Control-Allow-Origin": "*"}
+    else:
+        headers = {}
+    
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors()},
+        headers=headers
+    )
 
 
 # WebSocket connection manager
