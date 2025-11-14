@@ -21,9 +21,9 @@ class Settings(BaseSettings):
     PORT: int = Field(default=8000, description="Server port")
     
     # Database
-    DATABASE_URL: str = Field(
-        ...,
-        description="PostgreSQL database connection URL"
+    DATABASE_URL: Optional[str] = Field(
+        default=None,
+        description="PostgreSQL database connection URL (required for production)"
     )
     
     # WebSocket Settings
