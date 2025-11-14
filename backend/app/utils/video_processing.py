@@ -74,6 +74,39 @@ def decode_base64_video(base64_string: str) -> bytes:
             raise ValueError(f"Invalid base64 video data: only base64 data is allowed. Error: {str(e2)}")
 
 
+def detect_video_format(video_data: bytes) -> str:
+    """
+    Detect video format from video bytes.
+    
+    Args:
+        video_data: Video bytes
+        
+    Returns:
+        Format string ('webm', 'mp4', or 'unknown')
+    """
+    # Check magic bytes to determine format
+    # WebM: starts with 1A 45 DF A3 (EBML header)
+    # MP4: starts with ftyp box (00 00 00 ?? 66 74 79 70)
+    
+    if len(video_data) < 12:
+        return 'unknown'
+    
+    # Check for WebM (EBML header)
+    if video_data[:4] == b'\x1a\x45\xdf\xa3':
+        return 'webm'
+    
+    # Check for MP4 (ftyp box)
+    # MP4 files have 'ftyp' at offset 4 after a 4-byte size field
+    if b'ftyp' in video_data[:12]:
+        return 'mp4'
+    
+    # Check for older MP4 format
+    if video_data[4:8] == b'ftyp':
+        return 'mp4'
+    
+    return 'unknown'
+
+
 def extract_frames_from_video(video_data: bytes, max_frames: int = 30, 
                               frame_interval: int = 5) -> List[np.ndarray]:
     """
@@ -88,56 +121,127 @@ def extract_frames_from_video(video_data: bytes, max_frames: int = 30,
         List of numpy arrays representing frames (RGB format)
     """
     frames = []
+    tmp_path = None
+    
+    if not video_data or len(video_data) == 0:
+        logger.error("Empty video data provided")
+        return frames
     
     try:
-        # Write video data to temporary file-like object
-        video_buffer = io.BytesIO(video_data)
-        
-        # Use OpenCV to read video
-        # Create a temporary file path or use memory buffer
-        # OpenCV VideoCapture needs a file path, so we'll use a workaround
         import tempfile
         import os
         
-        with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file:
+        # Detect video format
+        video_format = detect_video_format(video_data)
+        logger.info(f"Detected video format: {video_format}")
+        
+        # Determine file extension based on detected format
+        if video_format == 'webm':
+            suffix = '.webm'
+        elif video_format == 'mp4':
+            suffix = '.mp4'
+        else:
+            # Try WebM first (most common for browser recordings)
+            suffix = '.webm'
+        
+        # Create temporary file with appropriate extension
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp_file:
             tmp_file.write(video_data)
             tmp_path = tmp_file.name
+            tmp_file.flush()
+            os.fsync(tmp_file.fileno())  # Ensure data is written to disk
         
         try:
             # Open video with OpenCV
+            logger.info(f"Attempting to open video file: {tmp_path} (format: {video_format})")
             cap = cv2.VideoCapture(tmp_path)
             
             if not cap.isOpened():
-                logger.error("Could not open video file")
-                return frames
+                logger.error(f"Could not open video file: {tmp_path}")
+                # Try alternative format if WebM failed
+                if suffix == '.webm':
+                    logger.info("Trying MP4 format as fallback...")
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.mp4') as tmp_file2:
+                        tmp_file2.write(video_data)
+                        tmp_file2.flush()
+                        os.fsync(tmp_file2.fileno())
+                        tmp_path2 = tmp_file2.name
+                    
+                    cap = cv2.VideoCapture(tmp_path2)
+                    if cap.isOpened():
+                        logger.info("Successfully opened video with MP4 format")
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                        tmp_path = tmp_path2
+                    else:
+                        logger.error("Could not open video with MP4 format either")
+                        if os.path.exists(tmp_path2):
+                            os.unlink(tmp_path2)
+                        return frames
+                else:
+                    return frames
             
-            frame_count = 0
+            # Get video properties for validation
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            frame_count_total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            
+            logger.info(f"Video properties: {width}x{height}, {fps} FPS, {frame_count_total} total frames")
+            
+            if frame_count_total == 0:
+                logger.warning("Video reports 0 frames, attempting to read anyway")
+            
             extracted_count = 0
+            current_frame = 0
             
+            # Read frames
             while extracted_count < max_frames:
                 ret, frame = cap.read()
                 
                 if not ret:
+                    # No more frames or error reading
+                    if extracted_count == 0:
+                        logger.warning(f"No frames could be read from video (read {current_frame} frames before failure)")
                     break
                 
                 # Extract frame at intervals
-                if frame_count % frame_interval == 0:
-                    # Convert BGR to RGB (OpenCV uses BGR)
-                    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                    frames.append(frame_rgb)
-                    extracted_count += 1
+                if current_frame % frame_interval == 0:
+                    # Validate frame
+                    if frame is not None and frame.size > 0:
+                        # Convert BGR to RGB (OpenCV uses BGR)
+                        if len(frame.shape) == 3:
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                        else:
+                            # Grayscale frame, convert to RGB
+                            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_GRAY2RGB)
+                        
+                        frames.append(frame_rgb)
+                        extracted_count += 1
+                    else:
+                        logger.warning(f"Invalid frame at position {current_frame}")
                 
-                frame_count += 1
+                current_frame += 1
             
             cap.release()
             
+            logger.info(f"Successfully extracted {len(frames)} frames from video")
+            
         finally:
             # Clean up temporary file
-            if os.path.exists(tmp_path):
-                os.unlink(tmp_path)
+            if tmp_path and os.path.exists(tmp_path):
+                try:
+                    os.unlink(tmp_path)
+                except Exception as cleanup_error:
+                    logger.warning(f"Error cleaning up temp file {tmp_path}: {cleanup_error}")
     
     except Exception as e:
-        logger.error(f"Error extracting frames from video: {e}")
+        logger.error(f"Error extracting frames from video: {e}", exc_info=True)
+        if tmp_path and os.path.exists(tmp_path):
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
     
     return frames
 
