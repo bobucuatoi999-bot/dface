@@ -52,11 +52,13 @@ echo "Running database migrations..."
 if alembic upgrade head; then
     echo "✓ Database migrations completed successfully"
 else
-    echo "⚠ WARNING: Database migrations failed or skipped"
-    echo "  This might be OK if:"
-    echo "  - Database is not ready yet"
-    echo "  - Migrations have already been applied"
-    echo "  The application will still attempt to start."
+    echo "⚠ WARNING: Database migrations failed"
+    echo ""
+    echo "If you see 'could not translate host name' error:"
+    echo "  → Your DATABASE_URL might be using internal Railway hostname"
+    echo "  → Try using DATABASE_PUBLIC_URL instead (from Postgres Variables)"
+    echo ""
+    echo "The application will still attempt to start."
 fi
 echo ""
 
