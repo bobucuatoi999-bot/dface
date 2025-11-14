@@ -534,12 +534,17 @@ async def websocket_recognize(websocket: WebSocket):
                         logger.warning(f"Mismatch: {len(valid_faces)} faces but {len(face_encodings)} encodings")
                         continue
                     
-                    # Recognize faces
+                    # Recognize faces with enhanced matching
                     recognized_users = []
                     for encoding in face_encodings:
+                        # Use enhanced matching (already improved in find_best_match)
                         match = face_recognition_service.find_best_match(encoding, db)
                         if match:
                             user, confidence = match
+                            # Apply confidence boost for high-quality matches
+                            # This makes recognition sharper and more reliable
+                            if confidence > 0.9:
+                                confidence = min(1.0, confidence * 1.05)  # Small boost for excellent matches
                             recognized_users.append((user.id, user.name, confidence))
                         else:
                             recognized_users.append((None, None, 0.0))

@@ -91,12 +91,34 @@ class FaceRecognitionService:
             # Calculate Euclidean distance
             distance = face_recognition.face_distance([known_encoding], unknown_encoding)[0]
             
+            # Normalize encodings for better comparison (unit vectors)
+            known_norm = np.linalg.norm(known_encoding)
+            unknown_norm = np.linalg.norm(unknown_encoding)
+            
+            if known_norm > 0 and unknown_norm > 0:
+                # Normalize to unit vectors
+                known_normalized = known_encoding / known_norm
+                unknown_normalized = unknown_encoding / unknown_norm
+                
+                # Calculate cosine similarity (dot product of normalized vectors)
+                cosine_similarity = np.dot(known_normalized, unknown_normalized)
+                
+                # Convert cosine similarity to distance (lower = better)
+                # Cosine similarity ranges from -1 to 1, we want 0-1 scale
+                cosine_distance = 1.0 - ((cosine_similarity + 1.0) / 2.0)
+                
+                # Use the average of Euclidean and cosine distance for better accuracy
+                combined_distance = (distance + cosine_distance) / 2.0
+            else:
+                combined_distance = distance
+            
             # Check if distance is below threshold
-            is_match = distance <= self.match_threshold
+            is_match = combined_distance <= self.match_threshold
             
             # Convert distance to confidence (0.0 to 1.0)
+            # Use exponential decay for smoother confidence curve
             # Lower distance = higher confidence
-            confidence = max(0.0, min(1.0, 1.0 - (distance / self.match_threshold)))
+            confidence = max(0.0, min(1.0, np.exp(-combined_distance / (self.match_threshold * 0.5))))
             
             return is_match, confidence
             
@@ -138,7 +160,10 @@ class FaceRecognitionService:
             best_confidence = 0.0
             best_embedding_id = None
             
-            # Compare with each embedding (check cache first)
+            # Enhanced matching: Try all embeddings for each user and use best one
+            # This improves accuracy by comparing against multiple angles
+            user_confidence_map = {}  # Track best confidence per user
+            
             for embedding in embeddings:
                 # Try cache first
                 cached_emb = self.cache_service.get_face_embedding(embedding.user_id, embedding.id)
@@ -157,11 +182,27 @@ class FaceRecognitionService:
                 # Compare faces
                 is_match, confidence = self.compare_faces(known_encoding, unknown_encoding)
                 
-                # Update best match if this is better
-                if is_match and confidence > best_confidence:
-                    best_match = embedding.user
-                    best_confidence = confidence
-                    best_embedding_id = embedding.id
+                # For each user, keep track of the best confidence across all their embeddings
+                if is_match:
+                    user_id = embedding.user_id
+                    if user_id not in user_confidence_map:
+                        user_confidence_map[user_id] = {
+                            "user": embedding.user,
+                            "best_confidence": confidence,
+                            "best_embedding_id": embedding.id
+                        }
+                    else:
+                        # Update if this embedding has better confidence
+                        if confidence > user_confidence_map[user_id]["best_confidence"]:
+                            user_confidence_map[user_id]["best_confidence"] = confidence
+                            user_confidence_map[user_id]["best_embedding_id"] = embedding.id
+            
+            # Find the user with the highest confidence
+            for user_id, user_data in user_confidence_map.items():
+                if user_data["best_confidence"] > best_confidence:
+                    best_match = user_data["user"]
+                    best_confidence = user_data["best_confidence"]
+                    best_embedding_id = user_data["best_embedding_id"]
             
             # Check if best match meets confidence threshold
             if best_match and best_confidence >= self.confidence_threshold:

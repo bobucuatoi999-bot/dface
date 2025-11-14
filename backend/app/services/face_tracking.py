@@ -49,11 +49,25 @@ class FaceTrack:
         self.frame_count += 1
         self.is_lost = False
         
-        # Update identity if provided
+        # Temporal smoothing: Use weighted average for confidence
+        # This makes recognition more stable and reliable
         if user_id is not None:
-            self.user_id = user_id
-            self.user_name = user_name
-            self.confidence = confidence
+            # New recognition
+            if self.user_id == user_id:
+                # Same user - average confidence (weighted towards recent)
+                alpha = 0.3  # Smoothing factor (lower = more smoothing)
+                self.confidence = alpha * confidence + (1 - alpha) * self.confidence
+            else:
+                # Different user or first recognition - use current confidence if higher
+                if confidence > self.confidence or self.user_id is None:
+                    self.user_id = user_id
+                    self.user_name = user_name
+                    self.confidence = confidence
+                # Otherwise keep previous recognition (temporal consistency)
+        elif self.user_id is not None and self.frame_count > 5:
+            # If we've had a good recognition for several frames, keep it
+            # This prevents flickering between recognized/unknown
+            pass  # Keep current user_id and confidence
     
     def mark_lost(self):
         """Mark track as lost (face disappeared)."""

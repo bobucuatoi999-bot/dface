@@ -28,9 +28,28 @@ def decode_base64_video(base64_string: str) -> bytes:
     if ',' in base64_string:
         base64_string = base64_string.split(',')[1]
     
-    # Decode base64
-    video_data = base64.b64decode(base64_string)
-    return video_data
+    # Fix base64 padding (base64 strings must have length multiple of 4)
+    # Add padding if needed
+    missing_padding = len(base64_string) % 4
+    if missing_padding:
+        base64_string += '=' * (4 - missing_padding)
+    
+    # Remove any whitespace or newlines
+    base64_string = base64_string.strip()
+    
+    try:
+        # Decode base64
+        video_data = base64.b64decode(base64_string, validate=True)
+        return video_data
+    except Exception as e:
+        logger.error(f"Error decoding base64 video: {e}")
+        # Try without padding fix as fallback
+        try:
+            video_data = base64.b64decode(base64_string)
+            return video_data
+        except Exception as e2:
+            logger.error(f"Error decoding base64 video (fallback): {e2}")
+            raise ValueError(f"Invalid base64 video data: {str(e)}")
 
 
 def extract_frames_from_video(video_data: bytes, max_frames: int = 30, 
