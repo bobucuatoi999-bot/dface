@@ -24,11 +24,18 @@ try:
         # Check if any admin exists
         existing_admin = db.query(AuthUser).filter(AuthUser.role == UserRole.ADMIN).first()
         
-        if not existing_admin:
+        if existing_admin:
+            # Admin exists, log info
+            print(f"ℹ️  Admin user already exists: {existing_admin.username} (ID: {existing_admin.id})", file=sys.stderr)
+            print(f"   Email: {existing_admin.email or 'N/A'}", file=sys.stderr)
+            print(f"   Active: {existing_admin.is_active}", file=sys.stderr)
+        else:
             # No admin exists, create one
             username = os.getenv("ADMIN_USERNAME", "admin")
             password = os.getenv("ADMIN_PASSWORD", "admin123")
             email = os.getenv("ADMIN_EMAIL", "admin@facestream.local")
+            
+            print(f"Creating admin user: {username}...", file=sys.stderr)
             
             admin = auth_service.create_user(
                 db=db,
@@ -41,18 +48,33 @@ try:
             db.commit()
             print(f"✅ Auto-created admin user: {username}", file=sys.stderr)
             print(f"   Password: {password}", file=sys.stderr)
+            print(f"   Email: {email}", file=sys.stderr)
             print(f"   ⚠️  Please change the password after first login!", file=sys.stderr)
-        else:
-            # Admin exists, do nothing
-            pass
+            
+            # Verify the user was created correctly
+            verify_user = db.query(AuthUser).filter(AuthUser.username == username).first()
+            if verify_user:
+                print(f"✅ Verified: User '{username}' exists in database", file=sys.stderr)
+                # Test password verification
+                if auth_service.verify_password(password, verify_user.hashed_password):
+                    print(f"✅ Verified: Password verification works correctly", file=sys.stderr)
+                else:
+                    print(f"❌ ERROR: Password verification FAILED!", file=sys.stderr)
+            else:
+                print(f"❌ ERROR: User was not found after creation!", file=sys.stderr)
             
     except Exception as e:
-        # Silently fail - don't crash the app if admin creation fails
-        print(f"⚠️  Could not auto-create admin: {e}", file=sys.stderr)
+        # Log error details
+        import traceback
+        print(f"❌ ERROR: Could not auto-create admin: {e}", file=sys.stderr)
+        print(f"Traceback:", file=sys.stderr)
+        traceback.print_exc(file=sys.stderr)
     finally:
         db.close()
         
 except Exception as e:
-    # Silently fail if imports fail
-    pass
+    # Log import errors
+    import traceback
+    print(f"❌ ERROR: Failed to import modules: {e}", file=sys.stderr)
+    traceback.print_exc(file=sys.stderr)
 
