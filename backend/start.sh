@@ -92,6 +92,11 @@ else
 fi
 echo ""
 
+# Auto-create admin user if none exists
+echo "Checking for admin user..."
+python auto_create_admin.py 2>&1 || echo "⚠️  Could not check/create admin user (non-critical)"
+echo ""
+
 # Start uvicorn with error handling
 echo "Starting uvicorn..."
 exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --loop asyncio --log-level info
