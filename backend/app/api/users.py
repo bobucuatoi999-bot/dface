@@ -8,9 +8,10 @@ from typing import List, Optional
 import logging
 
 from app.database import get_db
-from app.schemas.user import UserCreate, UserResponse, UserUpdate, UserRegisterRequest, MultiAngleRegistrationRequest
+from app.schemas.user import UserCreate, UserResponse, UserUpdate, UserRegisterRequest, MultiAngleRegistrationRequest, VideoRegistrationRequest
 from app.schemas.face_embedding import FaceEmbeddingResponse, AddFaceRequest
 from app.services.user_service import UserService
+from app.config import settings
 from app.utils.errors import (
     handle_exception, ValidationError, NotFoundError, FaceDetectionError,
     AuthenticationError, AuthorizationError,
@@ -24,6 +25,10 @@ try:
     from app.services.face_detection import FaceDetectionService
     from app.services.face_recognition import FaceRecognitionService
     from app.utils.image_processing import decode_base64_image, calculate_image_quality, check_face_size
+    from app.utils.video_processing import (
+        decode_base64_video, extract_frames_from_video, 
+        validate_video_for_face_detection, get_best_frames_from_video
+    )
     FACE_RECOGNITION_AVAILABLE = True
 except ImportError:
     FaceDetectionService = None
@@ -321,6 +326,193 @@ async def register_user_multi_angle(
         raise
     except Exception as e:
         logger.error(f"Error registering user with multi-angle: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error registering user: {str(e)}"
+        )
+
+
+@router.post("/register/video", response_model=UserResponse, status_code=status.HTTP_201_CREATED)
+async def register_user_with_video(
+    request: VideoRegistrationRequest,
+    db: Session = Depends(get_db),
+    current_user: AuthUser = Depends(require_role(UserRole.ADMIN))
+):
+    """
+    Register a new user with video capture.
+    
+    This endpoint accepts a video (MP4 or WebM) and:
+    1. Extracts frames from the video
+    2. Validates that the video contains sufficient good-quality face frames
+    3. Selects the best frames for registration
+    4. Creates face embeddings from multiple angles for better recognition
+    
+    Video Requirements:
+    - Format: MP4 or WebM
+    - Duration: 3-10 seconds recommended
+    - At least 5 frames must contain a detectable face
+    - Face should be clearly visible, well-lit, and fill at least 1/4 of frame
+    - Minimum face size: 100x100 pixels
+    
+    Returns the created user with face embeddings and validation results.
+    """
+    if not FACE_RECOGNITION_AVAILABLE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Face recognition services are not available"
+        )
+    
+    try:
+        # Validate input
+        validate_user_data(request.name, request.email)
+        
+        # Decode video
+        logger.info(f"Decoding video for user registration: {request.name}")
+        video_data = decode_base64_video(request.video_data)
+        
+        # Extract frames from video
+        logger.info("Extracting frames from video...")
+        frames = extract_frames_from_video(video_data, max_frames=30, frame_interval=5)
+        
+        if not frames:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not extract frames from video. Please ensure video format is supported (MP4 or WebM)."
+            )
+        
+        logger.info(f"Extracted {len(frames)} frames from video")
+        
+        # Validate video meets requirements
+        logger.info("Validating video for face detection...")
+        validation_result = validate_video_for_face_detection(
+            frames,
+            min_frames_with_face=request.min_frames_with_face,
+            min_face_size=settings.MIN_FACE_SIZE,
+            min_quality_score=request.min_quality_score
+        )
+        
+        if not validation_result["valid"]:
+            # Return detailed validation errors
+            error_detail = {
+                "message": "Video does not meet face detection requirements",
+                "validation": validation_result
+            }
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=error_detail
+            )
+        
+        logger.info(f"Video validation passed: {validation_result['frames_meeting_requirements']} frames meet requirements")
+        
+        # Get best frames for registration
+        logger.info("Selecting best frames for registration...")
+        best_frames = get_best_frames_from_video(
+            frames,
+            num_frames=3,  # Use top 3 frames
+            min_face_size=settings.MIN_FACE_SIZE,
+            min_quality_score=request.min_quality_score
+        )
+        
+        if not best_frames:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not find suitable frames for registration"
+            )
+        
+        logger.info(f"Selected {len(best_frames)} best frames for registration")
+        
+        # Process frames and extract embeddings
+        embeddings = []
+        quality_scores = []
+        angles = ["frontal", "left", "right"]  # Assign angles to frames
+        
+        for idx, (frame, quality, face_location) in enumerate(best_frames):
+            try:
+                # Extract embedding
+                embedding = face_recognition_service.extract_embedding(frame, face_location)
+                
+                if embedding is None:
+                    logger.warning(f"Could not extract embedding from frame {idx}, skipping")
+                    continue
+                
+                # Determine angle (use first as frontal, others as left/right)
+                angle = angles[min(idx, len(angles) - 1)]
+                
+                embeddings.append((embedding, angle, quality))
+                quality_scores.append(quality)
+                
+            except Exception as e:
+                logger.warning(f"Error processing frame {idx}: {e}, skipping")
+                continue
+        
+        if not embeddings:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Could not extract face embeddings from any frames"
+            )
+        
+        logger.info(f"Extracted {len(embeddings)} embeddings from video")
+        
+        # Check for duplicates using first embedding
+        first_embedding = embeddings[0][0]
+        duplicate = user_service.check_duplicate(db, first_embedding)
+        if duplicate:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Face already registered for user: {duplicate.name} (ID: {duplicate.id})"
+            )
+        
+        # Create user
+        user = user_service.create_user(
+            db=db,
+            name=request.name,
+            email=request.email,
+            employee_id=request.employee_id
+        )
+        
+        # Add all face embeddings
+        added_count = 0
+        for embedding, angle, quality in embeddings:
+            try:
+                user_service.add_face_embedding(
+                    db=db,
+                    user_id=user.id,
+                    embedding=embedding,
+                    capture_angle=angle,
+                    quality_score=quality
+                )
+                added_count += 1
+            except Exception as e:
+                logger.error(f"Error adding {angle} embedding: {e}")
+        
+        if added_count == 0:
+            # Rollback user creation if no embeddings added
+            db.delete(user)
+            db.commit()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to add face embeddings"
+            )
+        
+        # Refresh user to get face count
+        db.refresh(user)
+        user_dict = user.to_dict()
+        
+        avg_quality = sum(quality_scores) / len(quality_scores) if quality_scores else 0.0
+        
+        logger.info(f"Registered user with video: {user.name} (ID: {user.id}, {added_count} embeddings, avg quality: {avg_quality:.2f})")
+        
+        # Log validation info (for debugging)
+        logger.info(f"Video registration details: {validation_result['frames_analyzed']} frames analyzed, "
+                   f"{validation_result['frames_meeting_requirements']} met requirements, "
+                   f"best quality: {validation_result['best_frame_quality']:.2f}")
+        
+        return UserResponse(**user_dict)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error registering user with video: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error registering user: {str(e)}"

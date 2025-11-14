@@ -61,3 +61,13 @@ class MultiAngleRegistrationRequest(BaseModel):
     left_image: Optional[str] = Field(None, description="Base64 encoded left profile image")
     right_image: Optional[str] = Field(None, description="Base64 encoded right profile image")
     images: Optional[List[str]] = Field(None, description="List of base64 encoded images (alternative to individual angles)")
+
+
+class VideoRegistrationRequest(BaseModel):
+    """Schema for video-based user registration."""
+    name: str = Field(..., min_length=1, max_length=255, description="User's full name")
+    email: Optional[EmailStr] = Field(None, description="Email address")
+    employee_id: Optional[str] = Field(None, max_length=100, description="Employee/ID number")
+    video_data: str = Field(..., description="Base64 encoded video string (MP4 or WebM format)")
+    min_frames_with_face: int = Field(5, ge=3, le=20, description="Minimum number of frames that must contain a detectable face")
+    min_quality_score: float = Field(0.5, ge=0.0, le=1.0, description="Minimum quality score for frames to be considered valid")

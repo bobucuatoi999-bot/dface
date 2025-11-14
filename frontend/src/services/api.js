@@ -81,6 +81,18 @@ export const usersAPI = {
     return response.data
   },
   
+  registerWithVideo: async (name, email, employeeId, videoData, minFrames = 5, minQuality = 0.5) => {
+    const response = await api.post('/api/users/register/video', {
+      name,
+      email,
+      employee_id: employeeId,
+      video_data: videoData,
+      min_frames_with_face: minFrames,
+      min_quality_score: minQuality
+    })
+    return response.data
+  },
+  
   registerMultiAngle: async (name, email, images) => {
     const response = await api.post('/api/users/register/multi-angle', {
       name,
