@@ -127,6 +127,13 @@ def extract_frames_from_video(video_data: bytes, max_frames: int = 30,
         logger.error("Empty video data provided")
         return frames
     
+    # Validate minimum size (at least 1KB for a valid video)
+    if len(video_data) < 1024:
+        logger.error(f"Video data too small: {len(video_data)} bytes (minimum 1KB required)")
+        return frames
+    
+    logger.info(f"Processing video data: {len(video_data)} bytes ({len(video_data) / 1024:.2f} KB)")
+    
     try:
         import tempfile
         import os
@@ -135,6 +142,11 @@ def extract_frames_from_video(video_data: bytes, max_frames: int = 30,
         video_format = detect_video_format(video_data)
         logger.info(f"Detected video format: {video_format}")
         
+        # Log first few bytes for debugging
+        if len(video_data) >= 12:
+            first_bytes = video_data[:12]
+            logger.debug(f"Video header bytes: {first_bytes.hex()}")
+        
         # Determine file extension based on detected format
         if video_format == 'webm':
             suffix = '.webm'
@@ -142,6 +154,7 @@ def extract_frames_from_video(video_data: bytes, max_frames: int = 30,
             suffix = '.mp4'
         else:
             # Try WebM first (most common for browser recordings)
+            logger.warning(f"Unknown video format, defaulting to .webm")
             suffix = '.webm'
         
         # Create temporary file with appropriate extension
@@ -157,7 +170,15 @@ def extract_frames_from_video(video_data: bytes, max_frames: int = 30,
             cap = cv2.VideoCapture(tmp_path)
             
             if not cap.isOpened():
-                logger.error(f"Could not open video file: {tmp_path}")
+                error_msg = f"OpenCV could not open video file: {tmp_path}"
+                logger.error(error_msg)
+                logger.error(f"Video file size: {os.path.getsize(tmp_path) if os.path.exists(tmp_path) else 0} bytes")
+                logger.error(f"Video format detected: {video_format}, extension used: {suffix}")
+                
+                # Check if OpenCV has codec support
+                backend_info = cv2.videoio_registry.getBackends()
+                logger.error(f"Available OpenCV backends: {[str(b) for b in backend_info]}")
+                
                 # Try alternative format if WebM failed
                 if suffix == '.webm':
                     logger.info("Trying MP4 format as fallback...")
@@ -175,6 +196,10 @@ def extract_frames_from_video(video_data: bytes, max_frames: int = 30,
                         tmp_path = tmp_path2
                     else:
                         logger.error("Could not open video with MP4 format either")
+                        logger.error("Possible causes:")
+                        logger.error("1. Video codec not supported by OpenCV")
+                        logger.error("2. Video file is corrupted")
+                        logger.error("3. OpenCV build doesn't include required codecs")
                         if os.path.exists(tmp_path2):
                             os.unlink(tmp_path2)
                         return frames

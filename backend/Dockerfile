@@ -8,6 +8,7 @@ WORKDIR /app
 
 # Install system dependencies for face recognition
 # Required for compiling dlib and face-recognition packages
+# Also includes ffmpeg for WebM video codec support
 RUN apt-get update && apt-get install -y \
     build-essential \
     cmake \
@@ -20,6 +21,11 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     wget \
+    ffmpeg \
+    libavcodec-dev \
+    libavformat-dev \
+    libavutil-dev \
+    libswscale-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Install core dependencies first (fast, required for app to run)
