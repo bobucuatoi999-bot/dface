@@ -24,9 +24,19 @@ def decode_base64_video(base64_string: str) -> bytes:
     Returns:
         Video bytes
     """
-    # Remove data URL prefix if present
+    if not base64_string:
+        raise ValueError("Empty base64 string provided")
+    
+    # Remove data URL prefix if present (e.g., "data:video/webm;base64,...")
     if ',' in base64_string:
-        base64_string = base64_string.split(',')[1]
+        base64_string = base64_string.split(',')[-1]  # Take the last part after comma
+    
+    # Clean the base64 string: remove all whitespace, newlines, and non-base64 characters
+    # Base64 only contains: A-Z, a-z, 0-9, +, /, and = (for padding)
+    base64_string = re.sub(r'[^A-Za-z0-9+/=]', '', base64_string)
+    
+    if not base64_string:
+        raise ValueError("Invalid base64 video data: only base64 characters are allowed")
     
     # Fix base64 padding (base64 strings must have length multiple of 4)
     # Add padding if needed
@@ -34,22 +44,33 @@ def decode_base64_video(base64_string: str) -> bytes:
     if missing_padding:
         base64_string += '=' * (4 - missing_padding)
     
-    # Remove any whitespace or newlines
-    base64_string = base64_string.strip()
-    
     try:
-        # Decode base64
+        # Validate base64 string contains only valid characters
+        # Base64 alphabet: A-Z, a-z, 0-9, +, /, = (padding)
+        if not re.match(r'^[A-Za-z0-9+/]+=*$', base64_string):
+            raise ValueError("Invalid base64 video data: only base64 data is allowed")
+        
+        # Decode base64 with validation
         video_data = base64.b64decode(base64_string, validate=True)
+        
+        if len(video_data) == 0:
+            raise ValueError("Decoded video data is empty")
+        
         return video_data
+    except base64.binascii.Error as e:
+        logger.error(f"Base64 decoding error: {e}")
+        raise ValueError(f"Invalid base64 video data: only base64 data is allowed. Error: {str(e)}")
     except Exception as e:
         logger.error(f"Error decoding base64 video: {e}")
-        # Try without padding fix as fallback
+        # Try without strict validation as fallback
         try:
-            video_data = base64.b64decode(base64_string)
+            video_data = base64.b64decode(base64_string, validate=False)
+            if len(video_data) == 0:
+                raise ValueError("Decoded video data is empty")
             return video_data
         except Exception as e2:
             logger.error(f"Error decoding base64 video (fallback): {e2}")
-            raise ValueError(f"Invalid base64 video data: {str(e)}")
+            raise ValueError(f"Invalid base64 video data: only base64 data is allowed. Error: {str(e2)}")
 
 
 def extract_frames_from_video(video_data: bytes, max_frames: int = 30, 

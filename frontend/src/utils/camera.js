@@ -108,12 +108,38 @@ export const videoBlobToBase64 = (blob) => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
     reader.onloadend = () => {
-      const base64String = reader.result
-      // Remove data URL prefix
-      const base64 = base64String.includes(',') ? base64String.split(',')[1] : base64String
-      resolve(base64)
+      try {
+        const base64String = reader.result
+        
+        if (!base64String) {
+          reject(new Error('Failed to read video blob'))
+          return
+        }
+        
+        // Remove data URL prefix (e.g., "data:video/webm;base64,")
+        let base64 = base64String
+        if (base64String.includes(',')) {
+          base64 = base64String.split(',')[1]
+        }
+        
+        // Clean base64 string: remove whitespace, newlines, and any non-base64 characters
+        // Base64 only contains: A-Z, a-z, 0-9, +, /, and = (for padding)
+        base64 = base64.replace(/[^A-Za-z0-9+/=]/g, '')
+        
+        // Ensure it's not empty
+        if (!base64 || base64.length === 0) {
+          reject(new Error('Empty or invalid base64 string'))
+          return
+        }
+        
+        resolve(base64)
+      } catch (error) {
+        reject(error)
+      }
     }
-    reader.onerror = reject
+    reader.onerror = (error) => {
+      reject(new Error(`Failed to read video blob: ${error.message || 'Unknown error'}`))
+    }
     reader.readAsDataURL(blob)
   })
 }
