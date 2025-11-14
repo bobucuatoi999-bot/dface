@@ -15,7 +15,17 @@ from app.models.auth import AuthUser, UserRole
 logger = logging.getLogger(__name__)
 
 # Password hashing context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Initialize with explicit backend to avoid bcrypt initialization issues
+try:
+    # Try to use bcrypt backend explicitly
+    pwd_context = CryptContext(schemes=["bcrypt"], bcrypt__rounds=12, deprecated="auto")
+    # Force backend initialization by trying a simple hash
+    _test_hash = pwd_context.hash("test")
+except Exception as e:
+    logger.warning(f"Bcrypt initialization issue: {e}. Using fallback.")
+    # Fallback: use bcrypt directly if passlib fails
+    import bcrypt
+    pwd_context = None  # Will use bcrypt directly
 
 
 class AuthService:

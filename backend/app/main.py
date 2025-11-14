@@ -318,7 +318,7 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
                 "id": existing_admin.id
             }
         
-        # Create admin user - use AuthService to avoid bcrypt initialization issues
+        # Create admin user - use AuthService.create_user() which works correctly
         username = os.getenv("ADMIN_USERNAME", "admin")
         password = os.getenv("ADMIN_PASSWORD", "admin123")
         email = os.getenv("ADMIN_EMAIL", "admin@facestream.local")
@@ -327,75 +327,62 @@ async def create_admin_endpoint(db: Session = Depends(get_db)):
         logger.info(f"Email: {email}")
         logger.info(f"Role: admin")
         
-        # Use AuthService to hash password (avoids bcrypt initialization issues)
+        # Use AuthService.create_user() - this method works correctly and avoids bcrypt issues
+        # It uses the already-initialized pwd_context from auth_service.py
         auth_service = AuthService()
-        hashed_password = auth_service.get_password_hash(password)
-        logger.info(f"Password hashed: {hashed_password[:20]}...")
         
-        # Create user directly
-        admin = AuthUser(
-            username=username,
-            email=email,
-            hashed_password=hashed_password,
-            role=UserRole.ADMIN,
-            is_active=True
-        )
-        
-        logger.info(f"User object created: {admin}")
-        
-        # Add to database
-        db.add(admin)
-        logger.info("User added to session")
-        
-        # Commit transaction
         try:
-            db.commit()
-            logger.info("Transaction committed successfully")
-        except Exception as commit_error:
-            logger.error(f"Commit failed: {commit_error}", exc_info=True)
+            # Create user using AuthService - this handles password hashing correctly
+            admin = auth_service.create_user(
+                db=db,
+                username=username,
+                password=password,
+                email=email,
+                role=UserRole.ADMIN
+            )
+            
+            logger.info(f"User created: {admin.username} (ID: {admin.id})")
+            
+            # Verify user was created - query again
+            verify_user = db.query(AuthUser).filter(AuthUser.id == admin.id).first()
+            logger.info(f"Verify user query result: {verify_user}")
+            
+            if not verify_user:
+                logger.error("User was not found after creation!")
+                return {
+                    "status": "error",
+                    "message": "User was not found after creation",
+                    "username": username
+                }
+            
+            # Verify password
+            password_verified = auth_service.verify_password(password, verify_user.hashed_password)
+            logger.info(f"Password verification: {password_verified}")
+            
+            if password_verified:
+                logger.info(f"✅ Admin user created successfully: {username} (ID: {verify_user.id})")
+                return {
+                    "status": "created",
+                    "message": f"Admin user created successfully",
+                    "username": username,
+                    "password": password,
+                    "id": verify_user.id,
+                    "email": email,
+                    "role": "admin",
+                    "is_active": verify_user.is_active,
+                    "verified": True
+                }
+            else:
+                logger.error("Password verification failed!")
+                return {
+                    "status": "error",
+                    "message": "Password verification failed",
+                    "username": username
+                }
+        except Exception as create_error:
+            logger.error(f"Error creating user: {create_error}", exc_info=True)
             db.rollback()
-            raise commit_error
-        
-        # Refresh to get ID
-        db.refresh(admin)
-        logger.info(f"User refreshed - ID: {admin.id}")
-        
-        # Verify user was created - query again
-        verify_user = db.query(AuthUser).filter(AuthUser.id == admin.id).first()
-        logger.info(f"Verify user query result: {verify_user}")
-        
-        if not verify_user:
-            logger.error("User was not found after commit!")
-            return {
-                "status": "error",
-                "message": "User was not found after commit",
-                "username": username
-            }
-        
-        # Verify password (auth_service already initialized above)
-        password_verified = auth_service.verify_password(password, verify_user.hashed_password)
-        logger.info(f"Password verification: {password_verified}")
-        
-        if password_verified:
-            logger.info(f"✅ Admin user created successfully: {username} (ID: {verify_user.id})")
-            return {
-                "status": "created",
-                "message": f"Admin user created successfully",
-                "username": username,
-                "password": password,
-                "id": verify_user.id,
-                "email": email,
-                "role": "admin",
-                "is_active": verify_user.is_active,
-                "verified": True
-            }
-        else:
-            logger.error("Password verification failed!")
-            return {
-                "status": "error",
-                "message": "Password verification failed",
-                "username": username
-            }
+            raise create_error
             
     except Exception as e:
         logger.error(f"Error creating admin: {e}", exc_info=True)
