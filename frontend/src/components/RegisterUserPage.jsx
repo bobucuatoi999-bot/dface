@@ -72,19 +72,7 @@ function RegisterUserPage() {
       setValidationInfo(null)
       setIsRecording(true)
       setRecordingTime(0)
-
-      // Start recording timer
-      timerRef.current = setInterval(() => {
-        setRecordingTime(prev => {
-          const newTime = prev + 0.1
-          if (newTime >= 7) {
-            // Auto-stop at 7 seconds
-            stopRecording()
-            return 7
-          }
-          return newTime
-        })
-      }, 100)
+      setVideoDuration(0)
 
       // Start video recording (7 seconds duration)
       const { recorder, promise } = startVideoRecording(videoRef.current, {
@@ -94,22 +82,37 @@ function RegisterUserPage() {
       
       recorderRef.current = recorder
 
-      // Wait for recording to complete
+      // Start recording timer for UI feedback
+      let currentTime = 0
+      timerRef.current = setInterval(() => {
+        currentTime += 0.1
+        setRecordingTime(currentTime)
+        if (currentTime >= 7.0) {
+          // Stop timer at 7 seconds
+          if (timerRef.current) {
+            clearInterval(timerRef.current)
+            timerRef.current = null
+          }
+        }
+      }, 100)
+
+      // Wait for recording to complete (will auto-stop at 7 seconds)
       const videoBlob = await promise
       
-      // Store duration before clearing timer
-      const finalDuration = recordingTime >= 7 ? 7 : recordingTime
-      
-      // Convert to base64
-      const videoBase64 = await videoBlobToBase64(videoBlob)
-      setRecordedVideo(videoBase64)
-      setVideoDuration(finalDuration)
-      setIsRecording(false)
-      
+      // Clear timer
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
       }
+      
+      // Store final duration (7 seconds)
+      setVideoDuration(7.0)
+      setRecordingTime(7.0)
+      setIsRecording(false)
+      
+      // Convert to base64
+      const videoBase64 = await videoBlobToBase64(videoBlob)
+      setRecordedVideo(videoBase64)
       
       // Stop camera after recording
       stopVideo()
@@ -118,6 +121,7 @@ function RegisterUserPage() {
       setError('Failed to record video: ' + error.message)
       setIsRecording(false)
       setRecordingTime(0)
+      setVideoDuration(0)
       if (timerRef.current) {
         clearInterval(timerRef.current)
         timerRef.current = null
@@ -125,12 +129,16 @@ function RegisterUserPage() {
     }
   }
 
-  const stopRecording = () => {
+  const stopRecording = async () => {
     if (recorderRef.current && recorderRef.current.state === 'recording') {
       recorderRef.current.stop()
+      // Wait for recording to stop and get the blob
+      // The promise will resolve when onstop is called
     }
     setIsRecording(false)
     if (timerRef.current) {
+      const finalTime = recordingTime
+      setVideoDuration(finalTime)
       clearInterval(timerRef.current)
       timerRef.current = null
     }
