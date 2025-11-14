@@ -28,8 +28,8 @@ if [ -z "$DATABASE_URL" ]; then
     echo ""
     echo "After setting DATABASE_URL, Railway will automatically redeploy."
     echo ""
-    echo "Waiting 30 seconds before exiting..."
-    sleep 30
+    echo "Container will exit (no restart loop)."
+    echo "Fix: Add PostgreSQL database in Railway Dashboard, then redeploy."
     exit 1
 fi
 
