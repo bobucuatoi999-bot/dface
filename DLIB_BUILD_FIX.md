@@ -2,20 +2,28 @@
 
 ## Problem
 
-dlib installation fails during Docker build with exit code 1.
+dlib installation fails during Docker build with CMake compatibility error:
+```
+CMake Error: Compatibility with CMake < 3.5 has been removed from CMake.
+```
 
 ## Root Cause
 
-dlib requires several system dependencies that were missing:
-1. **python3-dev** - Python development headers (CRITICAL - was missing!)
-2. **pkg-config** - Package configuration tool
-3. **cmake** - Build system (already had this)
-4. **build-essential** - Compiler tools (already had this)
-5. **libopenblas-dev** - BLAS library (already had this)
+**Two issues:**
+
+1. **Missing system dependencies** (fixed in first attempt):
+   - **python3-dev** - Python development headers (CRITICAL!)
+   - **pkg-config** - Package configuration tool
+
+2. **CMake compatibility issue** (current problem):
+   - dlib 19.24.2 bundles an old version of pybind11
+   - pybind11's CMakeLists.txt requires CMake 3.5 minimum
+   - Newer CMake versions (14.2.0+) removed support for old CMake 3.5 syntax
+   - This causes the build to fail during CMake configuration
 
 ## Fix Applied
 
-### Added Missing Dependencies
+### Step 1: Added Missing Dependencies
 
 Updated Dockerfile to include:
 ```dockerfile
@@ -32,10 +40,28 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 ```
 
-### Improved Installation Process
+### Step 2: Fix CMake Compatibility
 
-1. **Split installations** - Each package installs separately for better error visibility
-2. **Added progress messages** - Shows which package is installing
+**Problem**: dlib 19.24.2's bundled pybind11 requires CMake 3.5, but newer CMake versions don't support that old syntax.
+
+**Solution**: Patch pybind11's CMakeLists.txt before building:
+```dockerfile
+# Download dlib source
+RUN pip download --no-deps --no-binary :all: dlib==19.24.2
+
+# Extract and patch CMakeLists.txt
+RUN tar -xzf dlib-*.tar.gz && \
+    find dlib-*/dlib/external/pybind11 -name "CMakeLists.txt" \
+        -exec sed -i 's/cmake_minimum_required(VERSION 3.5)/cmake_minimum_required(VERSION 3.10)/' {} \;
+
+# Install patched dlib
+RUN pip install --no-cache-dir --no-build-isolation dlib-*/
+```
+
+### Step 3: Improved Installation Process
+
+1. **Split installations** - Each step runs separately for better error visibility
+2. **Added progress messages** - Shows which step is running
 3. **Set environment variables** - Optimizes dlib compilation:
    - `DLIB_USE_CUDA=0` - Disable CUDA (not available in Railway)
    - `DLIB_USE_BLAS=1` - Use BLAS for faster compilation
