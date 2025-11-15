@@ -17,6 +17,9 @@ function RegisterUserPage() {
   const [validationInfo, setValidationInfo] = useState(null)
   const [facesDetected, setFacesDetected] = useState([])
   const [faceDetectionStatus, setFaceDetectionStatus] = useState(null) // 'detecting', 'detected', 'none'
+  const [meetsRequirements, setMeetsRequirements] = useState(false) // Track if face meets quality requirements
+  const [liveFeedback, setLiveFeedback] = useState('') // Live feedback text shown in circle
+  const requirementsMetRef = useRef(false) // Track best status during recording
   
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -91,6 +94,55 @@ function RegisterUserPage() {
     ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
     ctx.stroke()
     
+    // Draw live feedback text inside/near circle during recording
+    if (isRecording) {
+      // Background for text readability
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+      ctx.fillRect(centerX - 200, centerY - 60, 400, 120)
+      
+      // Text styling
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 20px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      
+      // Draw main feedback message
+      let feedbackText = liveFeedback || 'Position your face in the circle'
+      let feedbackColor = '#ffffff'
+      
+      if (meetsRequirements) {
+        feedbackText = '✅ Perfect! Keep your position'
+        feedbackColor = '#00ff00'
+      } else if (liveFeedback) {
+        if (liveFeedback.includes('Too Far')) {
+          feedbackColor = '#ffaa00' // Orange
+        } else if (liveFeedback.includes('Too Close')) {
+          feedbackColor = '#ffaa00' // Orange
+        } else if (liveFeedback.includes('No face')) {
+          feedbackColor = '#ff4444' // Red
+        }
+      }
+      
+      ctx.fillStyle = feedbackColor
+      ctx.fillText(feedbackText, centerX, centerY - 15)
+      
+      // Draw status text below
+      ctx.font = '16px sans-serif'
+      ctx.fillStyle = '#ffffff'
+      const statusText = meetsRequirements 
+        ? 'Requirements met - Recording...' 
+        : 'Adjust position to meet requirements'
+      ctx.fillText(statusText, centerX, centerY + 15)
+      
+      // Draw requirement status
+      ctx.font = '14px sans-serif'
+      ctx.fillStyle = meetsRequirements ? '#00ff00' : '#ffaa00'
+      const requirementStatus = meetsRequirements
+        ? '✓ Ready to submit'
+        : '✗ Requirements not met'
+      ctx.fillText(requirementStatus, centerX, centerY + 40)
+    }
+    
     if (faces && faces.length > 0) {
       let bestFace = null
       let bestQuality = 0
@@ -123,6 +175,22 @@ function RegisterUserPage() {
         const qualityStatus = posStatus.quality_status || 'fair'
         const sizeStatus = posStatus.size_status || 'acceptable'
         
+        // Check if requirements are met (for submit button)
+        // Requirements: quality_status must be 'excellent' or 'good', distance_status must be 'perfect'
+        const currentMeetsRequirements = (
+          (qualityStatus === 'excellent' || qualityStatus === 'good') &&
+          distanceStatus === 'perfect'
+        )
+        
+        // Update requirements status (keep best status during recording)
+        if (currentMeetsRequirements) {
+          requirementsMetRef.current = true
+          setMeetsRequirements(true)
+        } else if (!requirementsMetRef.current) {
+          // Only update to false if we haven't met requirements yet
+          setMeetsRequirements(false)
+        }
+        
         // Choose color based on quality
         let boxColor = '#ff4444' // Red - poor
         let labelBg = '#ff4444'
@@ -136,6 +204,23 @@ function RegisterUserPage() {
         } else if (qualityStatus === 'fair') {
           boxColor = '#ffaa00' // Orange - fair
           labelBg = '#ffaa00'
+        }
+        
+        // Update live feedback based on current status
+        if (isRecording) {
+          if (currentMeetsRequirements) {
+            setLiveFeedback('✅ Perfect Position!')
+          } else if (distanceStatus === 'too_far') {
+            setLiveFeedback('⚠️ Too Far - Move Closer')
+          } else if (distanceStatus === 'too_close') {
+            setLiveFeedback('⚠️ Too Close - Move Away')
+          } else if (qualityStatus === 'fair') {
+            setLiveFeedback('⚠️ Quality Fair - Improve Lighting')
+          } else if (qualityStatus === 'poor') {
+            setLiveFeedback('⚠️ Poor Quality - Better Lighting Needed')
+          } else {
+            setLiveFeedback('Position face in center')
+          }
         }
         
         // Draw bounding box
@@ -214,7 +299,13 @@ function RegisterUserPage() {
       }
     } else {
       setFaceDetectionStatus('none')
-      setError('⚠️ No face detected - Position your face in the center')
+      if (isRecording) {
+        setLiveFeedback('⚠️ No Face Detected - Position face in center')
+        setMeetsRequirements(false)
+        requirementsMetRef.current = false
+      } else {
+        setError('⚠️ No face detected - Position your face in the center')
+      }
     }
   }
 
@@ -316,6 +407,9 @@ function RegisterUserPage() {
       setIsRecording(true)
       setRecordingTime(0)
       setVideoDuration(0)
+      setMeetsRequirements(false) // Reset requirements status
+      requirementsMetRef.current = false // Reset requirements ref
+      setLiveFeedback('Detecting face...') // Initial feedback
 
       // Start video recording (7 seconds duration)
       // startVideoRecording now returns a Promise, so we need to await it
@@ -373,6 +467,15 @@ function RegisterUserPage() {
       setVideoDuration(7.0)
       setRecordingTime(7.0)
       setIsRecording(false)
+      
+      // Check if requirements were met during recording
+      if (!requirementsMetRef.current) {
+        setError('⚠️ Video does not meet quality requirements. Please record again with your face in the optimal position (within the circle guide).')
+        setRecordedVideo(null) // Clear video so user can record again
+        setMeetsRequirements(false)
+      } else {
+        setError('') // Clear any errors if requirements met
+      }
       
       // Convert to base64
       const videoBase64 = await videoBlobToBase64(videoBlob)
