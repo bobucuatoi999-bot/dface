@@ -871,9 +871,19 @@ function RegisterUserPage() {
             {error && <div className="error-message">{error}</div>}
             {success && <div className="success-message">{success}</div>}
 
-            <button type="submit" className="btn-primary btn-submit" disabled={loading || !recordedVideo}>
+            <button 
+              type="submit" 
+              className="btn-primary btn-submit" 
+              disabled={loading || !recordedVideo || !meetsRequirements}
+              title={!recordedVideo ? 'Please record a video first' : !meetsRequirements ? 'Video does not meet quality requirements. Please record again with your face in the optimal position.' : ''}
+            >
               {loading ? 'Registering...' : '✅ Register User'}
             </button>
+            {!meetsRequirements && recordedVideo && (
+              <p style={{ color: '#ff4444', fontSize: '14px', marginTop: '8px', textAlign: 'center' }}>
+                ⚠️ Video does not meet quality requirements. Please record again with your face positioned within the circle guide.
+              </p>
+            )}
           </form>
         </div>
       </div>
