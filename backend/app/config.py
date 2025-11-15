@@ -66,6 +66,14 @@ class Settings(BaseSettings):
         default=100,
         description="Minimum face size in pixels (width or height)"
     )
+    OPTIMAL_FACE_SIZE_MIN: int = Field(
+        default=150,
+        description="Optimal minimum face size for best recognition quality"
+    )
+    OPTIMAL_FACE_SIZE_MAX: int = Field(
+        default=350,
+        description="Optimal maximum face size for best recognition quality"
+    )
     
     # Security & Authentication
     SECRET_KEY: str = Field(

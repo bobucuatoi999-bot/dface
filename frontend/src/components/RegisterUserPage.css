@@ -46,6 +46,21 @@
   gap: 16px;
 }
 
+.position-guide-info {
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.guide-text {
+  color: #667eea;
+  font-weight: 600;
+  font-size: 14px;
+  margin: 0;
+  padding: 8px 16px;
+  background: rgba(102, 126, 234, 0.1);
+  border-radius: 8px;
+}
+
 .camera-preview {
   width: 100%;
   max-width: 640px;

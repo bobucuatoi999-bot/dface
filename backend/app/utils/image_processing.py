@@ -273,6 +273,102 @@ def check_face_size(face_location: Tuple[int, int, int, int], min_size: int = 10
     return width >= min_size and height >= min_size
 
 
+def calculate_face_position_status(
+    face_location: Tuple[int, int, int, int],
+    image_width: int,
+    image_height: int,
+    optimal_size_min: int = 150,
+    optimal_size_max: int = 350
+) -> dict:
+    """
+    Calculate face position status for optimal recognition.
+    
+    Args:
+        face_location: Tuple (top, right, bottom, left)
+        image_width: Full image width
+        image_height: Full image height
+        optimal_size_min: Optimal minimum face size (pixels)
+        optimal_size_max: Optimal maximum face size (pixels)
+        
+    Returns:
+        Dictionary with:
+        - size_status: "too_small", "too_large", "optimal", "acceptable"
+        - distance_status: "too_far", "too_close", "perfect", "acceptable"
+        - position_status: "centered", "off_center", "edge"
+        - center_offset: (x_offset, y_offset) from image center
+        - face_size: average of width and height
+        - quality_status: overall quality assessment
+    """
+    from app.config import settings
+    
+    top, right, bottom, left = face_location
+    face_width = right - left
+    face_height = bottom - top
+    face_size = (face_width + face_height) / 2.0  # Average size
+    
+    # Calculate face center
+    face_center_x = (left + right) / 2.0
+    face_center_y = (top + bottom) / 2.0
+    
+    # Calculate image center
+    image_center_x = image_width / 2.0
+    image_center_y = image_height / 2.0
+    
+    # Calculate offset from center (normalized to 0-1)
+    x_offset = abs(face_center_x - image_center_x) / image_width if image_width > 0 else 0
+    y_offset = abs(face_center_y - image_center_y) / image_height if image_height > 0 else 0
+    center_offset = (x_offset, y_offset)
+    
+    # Determine size status
+    if face_size < settings.MIN_FACE_SIZE:
+        size_status = "too_small"
+        distance_status = "too_far"
+    elif face_size < optimal_size_min:
+        size_status = "acceptable"
+        distance_status = "acceptable"
+    elif face_size <= optimal_size_max:
+        size_status = "optimal"
+        distance_status = "perfect"
+    elif face_size <= optimal_size_max * 1.3:
+        size_status = "acceptable"
+        distance_status = "acceptable"
+    else:
+        size_status = "too_large"
+        distance_status = "too_close"
+    
+    # Determine position status
+    max_offset = max(x_offset, y_offset)
+    if max_offset < 0.15:  # Within 15% of center
+        position_status = "centered"
+    elif max_offset < 0.30:  # Within 30% of center
+        position_status = "off_center"
+    else:
+        position_status = "edge"
+    
+    # Overall quality status (combines all factors)
+    if size_status == "optimal" and position_status == "centered":
+        quality_status = "excellent"
+    elif size_status in ["optimal", "acceptable"] and position_status in ["centered", "off_center"]:
+        quality_status = "good"
+    elif size_status in ["too_small", "too_large"]:
+        quality_status = "poor"
+    else:
+        quality_status = "fair"
+    
+    return {
+        "size_status": size_status,
+        "distance_status": distance_status,
+        "position_status": position_status,
+        "center_offset": center_offset,
+        "face_size": round(face_size, 1),
+        "face_width": face_width,
+        "face_height": face_height,
+        "face_center": (round(face_center_x, 1), round(face_center_y, 1)),
+        "quality_status": quality_status,
+        "optimal_size_range": (optimal_size_min, optimal_size_max)
+    }
+
+
 def extract_face_region(image: np.ndarray, face_location: Tuple[int, int, int, int], 
                        padding: int = 20) -> np.ndarray:
     """

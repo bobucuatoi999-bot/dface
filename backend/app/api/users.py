@@ -24,7 +24,10 @@ from app.models.auth import AuthUser, UserRole
 try:
     from app.services.face_detection import FaceDetectionService
     from app.services.face_recognition import FaceRecognitionService
-    from app.utils.image_processing import decode_base64_image, calculate_image_quality, check_face_size
+    from app.utils.image_processing import (
+        decode_base64_image, calculate_image_quality, check_face_size,
+        calculate_face_position_status
+    )
     from app.utils.video_processing import (
         decode_base64_video, extract_frames_from_video, 
         validate_video_for_face_detection, get_best_frames_from_video
@@ -632,7 +635,8 @@ async def detect_faces_endpoint(
     db: Session = Depends(get_db)
 ):
     """
-    Detect faces in an image (for real-time face tracking during registration).
+    Detect faces in an image with landmarks, position analysis, and quality feedback.
+    Enhanced for optimal recognition positioning guide.
     
     Request body:
     {
@@ -644,10 +648,35 @@ async def detect_faces_endpoint(
         "faces": [
             {
                 "bbox": [top, right, bottom, left],
-                "confidence": 1.0
+                "confidence": 1.0,
+                "landmarks": {
+                    "chin": [[x, y], ...],
+                    "left_eyebrow": [[x, y], ...],
+                    "right_eyebrow": [[x, y], ...],
+                    "nose_bridge": [[x, y], ...],
+                    "nose_tip": [[x, y], ...],
+                    "left_eye": [[x, y], ...],
+                    "right_eye": [[x, y], ...],
+                    "top_lip": [[x, y], ...],
+                    "bottom_lip": [[x, y], ...]
+                },
+                "position_status": {
+                    "size_status": "optimal|too_small|too_large|acceptable",
+                    "distance_status": "perfect|too_far|too_close|acceptable",
+                    "position_status": "centered|off_center|edge",
+                    "quality_status": "excellent|good|fair|poor",
+                    "face_size": 200.5,
+                    "face_width": 180,
+                    "face_height": 220,
+                    "face_center": [320.0, 240.0],
+                    "center_offset": [0.05, 0.03],
+                    "optimal_size_range": [150, 350]
+                },
+                "quality_score": 0.85
             }
         ],
-        "face_count": 1
+        "face_count": 1,
+        "image_size": [640, 480]
     }
     """
     if not FACE_RECOGNITION_AVAILABLE:
@@ -666,22 +695,48 @@ async def detect_faces_endpoint(
         
         # Decode image
         image = decode_base64_image(image_data)
+        height, width = image.shape[:2]
         
-        # Detect faces
-        face_locations = face_detection_service.detect_faces(image)
+        # Detect faces with landmarks
+        face_locations, face_landmarks_list = face_detection_service.detect_faces_with_landmarks(image)
         
-        # Format response
+        # Format response with enhanced information
         faces = []
-        for face_loc in face_locations:
+        for idx, face_loc in enumerate(face_locations):
             top, right, bottom, left = face_loc
+            
+            # Get landmarks for this face
+            landmarks_dict = {}
+            if idx < len(face_landmarks_list) and face_landmarks_list[idx]:
+                landmarks = face_landmarks_list[idx]
+                # Convert landmarks to serializable format
+                for key, points in landmarks.items():
+                    landmarks_dict[key] = [[int(p[0]), int(p[1])] for p in points]
+            
+            # Calculate position status
+            position_status = calculate_face_position_status(
+                face_loc,
+                width,
+                height,
+                optimal_size_min=settings.OPTIMAL_FACE_SIZE_MIN,
+                optimal_size_max=settings.OPTIMAL_FACE_SIZE_MAX
+            )
+            
+            # Calculate quality score
+            quality_score = calculate_image_quality(image, face_loc)
+            
             faces.append({
                 "bbox": [int(top), int(right), int(bottom), int(left)],
-                "confidence": 1.0  # face_recognition doesn't provide confidence, assume 1.0
+                "confidence": 1.0,  # face_recognition doesn't provide confidence, assume 1.0
+                "landmarks": landmarks_dict,
+                "position_status": position_status,
+                "quality_score": round(quality_score, 2)
             })
         
         return {
             "faces": faces,
-            "face_count": len(faces)
+            "face_count": len(faces),
+            "image_size": [width, height]
         }
         
     except HTTPException:

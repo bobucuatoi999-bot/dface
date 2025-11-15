@@ -32,10 +32,15 @@ try:
     from app.services.face_detection import FaceDetectionService
     from app.services.face_recognition import FaceRecognitionService
     from app.services.face_tracking import FaceTrackingService
-    from app.utils.image_processing import decode_base64_image, resize_image, check_face_size, calculate_image_quality
+    import face_recognition
+    from app.utils.image_processing import (
+        decode_base64_image, resize_image, check_face_size, 
+        calculate_image_quality, calculate_face_position_status
+    )
     FACE_RECOGNITION_AVAILABLE = True
 except ImportError as e:
     logger.warning(f"Face recognition modules not available: {e}. Backend will run in auth-only mode.")
+    face_recognition = None
     FaceDetectionService = None
     FaceRecognitionService = None
     FaceTrackingService = None
@@ -600,9 +605,16 @@ async def websocket_recognize(websocket: WebSocket):
                         recognized_users
                     )
                     
-                    # Build response
+                    # Get landmarks for valid faces
+                    try:
+                        face_landmarks_list = face_recognition.face_landmarks(image, valid_faces)
+                    except Exception as e:
+                        logger.warning(f"Error getting landmarks: {e}")
+                        face_landmarks_list = []
+                    
+                    # Build response with enhanced information
                     faces_result = []
-                    for track in tracks:
+                    for idx, track in enumerate(tracks):
                         face_result = {
                             "track_id": track.track_id,
                             "bbox": list(track.bbox),  # [top, right, bottom, left]
@@ -615,6 +627,27 @@ async def websocket_recognize(websocket: WebSocket):
                             face_result["confidence"] = round(track.confidence, 4)
                         else:
                             face_result["confidence"] = 0.0
+                        
+                        # Add landmarks if available
+                        if idx < len(face_landmarks_list) and face_landmarks_list[idx]:
+                            landmarks = face_landmarks_list[idx]
+                            landmarks_dict = {}
+                            for key, points in landmarks.items():
+                                landmarks_dict[key] = [[int(p[0]), int(p[1])] for p in points]
+                            face_result["landmarks"] = landmarks_dict
+                        
+                        # Add position status for quality feedback
+                        try:
+                            position_status = calculate_face_position_status(
+                                track.bbox,
+                                width,
+                                height,
+                                optimal_size_min=settings.OPTIMAL_FACE_SIZE_MIN,
+                                optimal_size_max=settings.OPTIMAL_FACE_SIZE_MAX
+                            )
+                            face_result["position_status"] = position_status
+                        except Exception as e:
+                            logger.warning(f"Error calculating position status: {e}")
                         
                         faces_result.append(face_result)
                         

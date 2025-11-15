@@ -43,11 +43,47 @@ function RecognitionPage() {
     const ctx = canvas.getContext('2d')
     canvas.width = video.videoWidth
     canvas.height = video.videoHeight
+    
+    const canvasWidth = canvas.width
+    const canvasHeight = canvas.height
 
     // Clear canvas
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.clearRect(0, 0, canvasWidth, canvasHeight)
 
-    // Draw bounding boxes
+    // Draw optimal position guide circle (centered)
+    const centerX = canvasWidth / 2
+    const centerY = canvasHeight / 2
+    
+    // Calculate optimal circle size based on optimal face size range
+    // Optimal face size: 150-350px, assume face takes ~40% of circle diameter
+    const optimalCircleRadius = 350 / 0.4 / 2 // ~437px radius
+    
+    // Draw guide circle (always visible)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)' // Semi-transparent white
+    ctx.lineWidth = 2
+    ctx.setLineDash([5, 5]) // Dashed line
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalCircleRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+    ctx.setLineDash([]) // Reset line style
+    
+    // Draw inner circle (optimal zone)
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)' // Green, very transparent
+    ctx.lineWidth = 1
+    const optimalInnerRadius = 150 / 0.4 / 2 // ~187px radius
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalInnerRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+    
+    // Draw outer circle (max acceptable zone)
+    ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)' // Yellow, very transparent
+    ctx.lineWidth = 1
+    const optimalOuterRadius = optimalCircleRadius * 1.2
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+
+    // Draw bounding boxes with landmarks if available
     detectedFaces.forEach((face) => {
       const [top, right, bottom, left] = face.bbox
       const width = right - left
@@ -65,6 +101,44 @@ function RecognitionPage() {
       ctx.strokeStyle = color
       ctx.lineWidth = 3
       ctx.strokeRect(left, top, width, height)
+
+      // Draw face landmarks if available (from WebSocket recognition result)
+      // Note: WebSocket might not send landmarks, but we can try
+      if (face.landmarks) {
+        const landmarks = face.landmarks
+        ctx.strokeStyle = '#00ffff' // Cyan for landmarks
+        ctx.lineWidth = 2
+        ctx.fillStyle = '#00ffff'
+        
+        // Draw each landmark feature
+        const landmarkFeatures = [
+          'chin', 'left_eyebrow', 'right_eyebrow', 'nose_bridge', 
+          'nose_tip', 'left_eye', 'right_eye', 'top_lip', 'bottom_lip'
+        ]
+        
+        landmarkFeatures.forEach(feature => {
+          if (landmarks[feature] && Array.isArray(landmarks[feature])) {
+            ctx.beginPath()
+            landmarks[feature].forEach((point, idx) => {
+              const [x, y] = point
+              if (idx === 0) {
+                ctx.moveTo(x, y)
+              } else {
+                ctx.lineTo(x, y)
+              }
+            })
+            ctx.stroke()
+            
+            // Draw points
+            landmarks[feature].forEach((point) => {
+              const [x, y] = point
+              ctx.beginPath()
+              ctx.arc(x, y, 2, 0, 2 * Math.PI)
+              ctx.fill()
+            })
+          }
+        })
+      }
 
       // Draw label background
       const labelText = face.is_unknown
@@ -137,6 +211,13 @@ function RecognitionPage() {
 
       <div className="recognition-container">
         <div className="video-section">
+          {isActive && (
+            <div className="position-guide-info">
+              <p className="guide-text">
+                📍 Position your face within the white circle guide for best recognition
+              </p>
+            </div>
+          )}
           <div className="video-wrapper">
             <video
               ref={videoRef}
