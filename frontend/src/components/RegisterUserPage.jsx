@@ -230,21 +230,19 @@ function RegisterUserPage() {
           labelBg = '#ffaa00'
         }
         
-        // Update live feedback based on current status
-        if (isRecording) {
-          if (currentMeetsRequirements) {
-            setLiveFeedback('✅ Perfect Position!')
-          } else if (distanceStatus === 'too_far') {
-            setLiveFeedback('⚠️ Too Far - Move Closer')
-          } else if (distanceStatus === 'too_close') {
-            setLiveFeedback('⚠️ Too Close - Move Away')
-          } else if (qualityStatus === 'fair') {
-            setLiveFeedback('⚠️ Quality Fair - Improve Lighting')
-          } else if (qualityStatus === 'poor') {
-            setLiveFeedback('⚠️ Poor Quality - Better Lighting Needed')
-          } else {
-            setLiveFeedback('Position face in center')
-          }
+        // Update live feedback based on current status (always when camera is active)
+        if (currentMeetsRequirements) {
+          setLiveFeedback(isRecording ? '✅ Perfect Position!' : '✅ Perfect Position - Ready!')
+        } else if (distanceStatus === 'too_far') {
+          setLiveFeedback('⚠️ Too Far - Move Closer')
+        } else if (distanceStatus === 'too_close') {
+          setLiveFeedback('⚠️ Too Close - Move Away')
+        } else if (qualityStatus === 'fair') {
+          setLiveFeedback('⚠️ Quality Fair - Improve Lighting')
+        } else if (qualityStatus === 'poor') {
+          setLiveFeedback('⚠️ Poor Quality - Better Lighting Needed')
+        } else {
+          setLiveFeedback('Position face in center')
         }
         
         // Draw bounding box
@@ -323,10 +321,13 @@ function RegisterUserPage() {
       }
     } else {
       setFaceDetectionStatus('none')
-      if (isRecording) {
+      // Always update live feedback when camera is active (not just recording)
+      if (cameraActive) {
         setLiveFeedback('⚠️ No Face Detected - Position face in center')
         setMeetsRequirements(false)
         requirementsMetRef.current = false
+        // Still draw circle guide even if no face
+        drawCircleGuide()
       } else {
         setError('⚠️ No face detected - Position your face in the center')
       }
