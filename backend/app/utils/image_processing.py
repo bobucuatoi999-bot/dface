@@ -14,31 +14,103 @@ import cv2
 def decode_base64_image(base64_string: str) -> np.ndarray:
     """
     Decode base64 encoded image string to numpy array.
+    Professional image preprocessing with validation and quality checks.
     
     Args:
         base64_string: Base64 encoded image (with or without data URL prefix)
         
     Returns:
         numpy array representing the image (RGB format)
+        
+    Raises:
+        ValueError: If image data is invalid or cannot be decoded
     """
-    # Remove data URL prefix if present
-    if ',' in base64_string:
-        base64_string = base64_string.split(',')[1]
+    import logging
+    logger = logging.getLogger(__name__)
     
-    # Decode base64
-    image_data = base64.b64decode(base64_string)
+    if not base64_string:
+        raise ValueError("Empty base64 string provided")
     
-    # Convert to PIL Image
-    image = Image.open(io.BytesIO(image_data))
-    
-    # Convert to RGB if necessary
-    if image.mode != 'RGB':
-        image = image.convert('RGB')
-    
-    # Convert to numpy array
-    image_array = np.array(image)
-    
-    return image_array
+    try:
+        # Remove data URL prefix if present
+        if ',' in base64_string:
+            base64_string = base64_string.split(',')[-1]  # Take last part after comma
+        
+        # Decode base64
+        image_data = base64.b64decode(base64_string)
+        
+        if not image_data or len(image_data) == 0:
+            raise ValueError("Decoded image data is empty")
+        
+        logger.debug(f"Decoded image data: {len(image_data)} bytes")
+        
+        # Convert to PIL Image
+        try:
+            image = Image.open(io.BytesIO(image_data))
+        except Exception as e:
+            raise ValueError(f"Failed to open image: {str(e)}")
+        
+        # Validate image was successfully opened
+        if image is None:
+            raise ValueError("Failed to decode image from base64")
+        
+        # Log original image properties
+        logger.debug(f"Original image: mode={image.mode}, size={image.size}, format={image.format}")
+        
+        # Convert to RGB if necessary (required for face_recognition)
+        if image.mode != 'RGB':
+            logger.debug(f"Converting image from {image.mode} to RGB")
+            # Handle different color modes
+            if image.mode == 'RGBA':
+                # Create white background for RGBA images
+                rgb_image = Image.new('RGB', image.size, (255, 255, 255))
+                rgb_image.paste(image, mask=image.split()[3] if len(image.split()) > 3 else None)
+                image = rgb_image
+            elif image.mode == 'L':  # Grayscale
+                # Convert grayscale to RGB
+                image = image.convert('RGB')
+            elif image.mode == 'P':  # Palette mode
+                # Convert palette to RGB
+                image = image.convert('RGB')
+            else:
+                # Try direct conversion
+                image = image.convert('RGB')
+        
+        # Convert to numpy array
+        image_array = np.array(image)
+        
+        # Validate numpy array
+        if image_array is None or image_array.size == 0:
+            raise ValueError("Failed to convert image to numpy array")
+        
+        # Validate array shape (should be height x width x 3 for RGB)
+        if len(image_array.shape) != 3 or image_array.shape[2] != 3:
+            raise ValueError(f"Invalid image shape: {image_array.shape}, expected (height, width, 3) for RGB")
+        
+        # Validate array dtype (should be uint8)
+        if image_array.dtype != np.uint8:
+            logger.warning(f"Image dtype is {image_array.dtype}, converting to uint8")
+            # Ensure values are in valid range [0, 255]
+            if image_array.max() > 255 or image_array.min() < 0:
+                image_array = np.clip(image_array, 0, 255)
+            image_array = image_array.astype(np.uint8)
+        
+        # Validate pixel values are in valid range
+        if image_array.min() < 0 or image_array.max() > 255:
+            logger.warning(f"Image pixel values out of range: min={image_array.min()}, max={image_array.max()}")
+            image_array = np.clip(image_array, 0, 255).astype(np.uint8)
+        
+        height, width = image_array.shape[:2]
+        logger.debug(f"✅ Successfully decoded image: shape={image_array.shape}, dtype={image_array.dtype}, "
+                    f"range=[{image_array.min()}, {image_array.max()}], mean={image_array.mean():.2f}")
+        
+        return image_array
+        
+    except ValueError:
+        raise  # Re-raise ValueError as-is
+    except Exception as e:
+        logger.error(f"Error decoding base64 image: {e}", exc_info=True)
+        raise ValueError(f"Failed to decode base64 image: {str(e)}")
 
 
 def encode_image_to_base64(image_array: np.ndarray) -> str:
@@ -68,26 +140,71 @@ def encode_image_to_base64(image_array: np.ndarray) -> str:
 def resize_image(image: np.ndarray, max_size: int = 1920) -> np.ndarray:
     """
     Resize image if it's larger than max_size, maintaining aspect ratio.
+    Uses high-quality interpolation to preserve face detail.
     
     Args:
-        image: numpy array representing image
+        image: numpy array representing image (RGB format)
         max_size: Maximum width or height
         
     Returns:
-        Resized image array
+        Resized image array (same dtype and format as input)
     """
-    height, width = image.shape[:2]
+    import logging
+    logger = logging.getLogger(__name__)
     
-    if max(height, width) <= max_size:
+    if image is None or image.size == 0:
+        logger.warning("Empty image provided for resize")
+        return image
+    
+    height, width = image.shape[:2]
+    original_size = max(height, width)
+    
+    # Don't resize if image is already smaller than max_size
+    if original_size <= max_size:
+        logger.debug(f"Image size {width}x{height} is within limit ({max_size}), no resize needed")
         return image
     
     # Calculate scaling factor
-    scale = max_size / max(height, width)
+    scale = max_size / original_size
     new_width = int(width * scale)
     new_height = int(height * scale)
     
-    # Resize using OpenCV
+    # Ensure minimum size for face detection (at least 300px to preserve detail)
+    if min(new_width, new_height) < 300:
+        logger.warning(f"Resized image would be too small ({new_width}x{new_height}), "
+                      f"using minimum size of 300px")
+        # Scale to maintain aspect ratio with minimum 300px
+        min_dimension = 300
+        if width < height:
+            new_height = int(height * (min_dimension / width))
+            new_width = min_dimension
+        else:
+            new_width = int(width * (min_dimension / height))
+            new_height = min_dimension
+        # But still respect max_size
+        if max(new_width, new_height) > max_size:
+            scale = max_size / max(new_width, new_height)
+            new_width = int(new_width * scale)
+            new_height = int(new_height * scale)
+    
+    logger.debug(f"Resizing image from {width}x{height} to {new_width}x{new_height} "
+                f"(scale={scale:.3f}, preserving aspect ratio)")
+    
+    # Use high-quality interpolation for better face detail preservation
+    # INTER_AREA is best for downscaling, INTER_LINEAR for upscaling
+    # Since we're downscaling, INTER_AREA is optimal
     resized = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_AREA)
+    
+    # Validate resized image
+    if resized is None or resized.size == 0:
+        logger.error(f"Resize failed, returning original image")
+        return image
+    
+    # Ensure dtype is preserved
+    if resized.dtype != image.dtype:
+        resized = resized.astype(image.dtype)
+    
+    logger.debug(f"✅ Resized image: {resized.shape}, dtype={resized.dtype}")
     
     return resized
 

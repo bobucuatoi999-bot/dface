@@ -492,18 +492,44 @@ async def websocket_recognize(websocket: WebSocket):
                     # Decode base64 image
                     base64_image = data.get("data")
                     if not base64_image:
+                        logger.warning("Empty base64 image received in frame")
                         continue
                     
-                    image = decode_base64_image(base64_image)
+                    # Decode image with validation and quality checks
+                    try:
+                        image = decode_base64_image(base64_image)
+                    except ValueError as e:
+                        logger.error(f"Failed to decode image: {e}")
+                        continue
                     
-                    # Resize if too large (for performance)
+                    # Validate decoded image
+                    if image is None or image.size == 0:
+                        logger.error("Decoded image is empty or None")
+                        continue
+                    
+                    # Log image properties before processing
+                    height, width = image.shape[:2] if len(image.shape) >= 2 else (0, 0)
+                    logger.debug(f"Processing frame {data.get('frame_id')}: "
+                               f"image={width}x{height}, dtype={image.dtype}, "
+                               f"mean={image.mean():.2f}, std={image.std():.2f}")
+                    
+                    # Resize if too large (for performance) - but preserve quality
+                    original_size = max(width, height) if width > 0 and height > 0 else 0
                     image = resize_image(image, max_size=1920)
+                    resized_height, resized_width = image.shape[:2] if len(image.shape) >= 2 else (0, 0)
+                    if original_size != max(resized_width, resized_height):
+                        logger.debug(f"Image resized: {original_size}px → {max(resized_width, resized_height)}px")
                     
-                    # Detect faces
+                    # Detect faces with enhanced upsampling (now set to 2x in face_detection.py)
+                    logger.debug(f"Starting face detection on {resized_width}x{resized_height} image")
                     face_locations = face_detection_service.detect_faces(image)
                     
+                    # Log detection results
                     if not face_locations:
-                        # No faces detected
+                        logger.warning(f"⚠️ No faces detected in frame {data.get('frame_id')} "
+                                     f"(image: {resized_width}x{resized_height}px, "
+                                     f"model: {face_detection_service.model})")
+                        # Send empty result
                         await manager.send_personal_message({
                             "type": "recognition_result",
                             "frame_id": data.get("frame_id"),
@@ -512,13 +538,29 @@ async def websocket_recognize(websocket: WebSocket):
                         }, websocket)
                         continue
                     
-                    # Filter faces by minimum size
+                    logger.info(f"✅ Detected {len(face_locations)} face(s) in frame {data.get('frame_id')}")
+                    
+                    # Filter faces by minimum size (use same as registration: 100px)
+                    # This matches the registration requirement for consistency
                     valid_faces = []
-                    for face_loc in face_locations:
+                    filtered_count = 0
+                    for idx, face_loc in enumerate(face_locations):
+                        top, right, bottom, left = face_loc
+                        face_width = right - left
+                        face_height = bottom - top
+                        
                         if check_face_size(face_loc, settings.MIN_FACE_SIZE):
                             valid_faces.append(face_loc)
+                            logger.debug(f"  Face {idx+1}: {face_width}x{face_height}px - ✅ Valid (>= {settings.MIN_FACE_SIZE}px)")
+                        else:
+                            filtered_count += 1
+                            logger.debug(f"  Face {idx+1}: {face_width}x{face_height}px - ❌ Filtered (< {settings.MIN_FACE_SIZE}px minimum)")
+                    
+                    if filtered_count > 0:
+                        logger.warning(f"Filtered out {filtered_count} face(s) below minimum size ({settings.MIN_FACE_SIZE}px)")
                     
                     if not valid_faces:
+                        logger.warning(f"⚠️ No valid faces after size filtering in frame {data.get('frame_id')}")
                         await manager.send_personal_message({
                             "type": "recognition_result",
                             "frame_id": data.get("frame_id"),
@@ -526,6 +568,8 @@ async def websocket_recognize(websocket: WebSocket):
                             "timestamp": data.get("timestamp"),
                         }, websocket)
                         continue
+                    
+                    logger.info(f"✅ {len(valid_faces)} valid face(s) after filtering")
                     
                     # Extract face embeddings
                     face_encodings = face_recognition_service.extract_multiple_embeddings(image, valid_faces)

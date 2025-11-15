@@ -32,19 +32,40 @@ class FaceDetectionService:
             List of face locations as tuples (top, right, bottom, left)
         """
         try:
+            # Validate image input
+            if image is None or image.size == 0:
+                logger.warning("Empty or None image provided for face detection")
+                return []
+            
+            # Log image properties for debugging
+            height, width = image.shape[:2] if len(image.shape) >= 2 else (0, 0)
+            logger.debug(f"Face detection: image shape={image.shape}, size={width}x{height}, dtype={image.dtype}")
+            
             # face_recognition uses RGB format
+            # Increase upsampling from 1 to 2 for better detection of smaller faces
+            # number_of_times_to_upsample=2 means we'll detect faces that are 2x smaller
+            # This improves reliability but is slightly slower (acceptable trade-off)
             face_locations = face_recognition.face_locations(
                 image,
                 model=self.model,
-                number_of_times_to_upsample=1
+                number_of_times_to_upsample=2  # Enhanced: increased from 1 to 2 for better detection
             )
             
-            # Convert from (top, right, bottom, left) to (top, right, bottom, left)
-            # face_recognition already returns in this format
+            # Log detection results
+            if face_locations:
+                logger.info(f"✅ Detected {len(face_locations)} face(s) in image ({width}x{height})")
+                # Log face sizes for debugging
+                for i, (top, right, bottom, left) in enumerate(face_locations):
+                    face_width = right - left
+                    face_height = bottom - top
+                    logger.debug(f"  Face {i+1}: {face_width}x{face_height}px at ({left}, {top})")
+            else:
+                logger.debug(f"⚠️ No faces detected in image ({width}x{height}), model={self.model}, upsampling=2")
+            
             return face_locations
             
         except Exception as e:
-            logger.error(f"Error detecting faces: {e}")
+            logger.error(f"Error detecting faces: {e}", exc_info=True)
             return []
     
     def detect_faces_with_landmarks(self, image: np.ndarray) -> Tuple[List[Tuple[int, int, int, int]], List]:

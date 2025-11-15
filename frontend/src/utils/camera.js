@@ -44,14 +44,68 @@ export const stopCamera = (stream) => {
 }
 
 export const captureFrame = (videoElement) => {
-  return new Promise((resolve) => {
-    const canvas = document.createElement('canvas')
-    canvas.width = videoElement.videoWidth
-    canvas.height = videoElement.videoHeight
-    const ctx = canvas.getContext('2d')
-    ctx.drawImage(videoElement, 0, 0)
-    const imageData = canvas.toDataURL('image/jpeg', 0.8)
-    resolve(imageToBase64(imageData))
+  return new Promise((resolve, reject) => {
+    try {
+      // Validate video element
+      if (!videoElement) {
+        reject(new Error('Video element is not available'))
+        return
+      }
+
+      // Get actual video dimensions (not scaled display size)
+      const videoWidth = videoElement.videoWidth || videoElement.clientWidth || 640
+      const videoHeight = videoElement.videoHeight || videoElement.clientHeight || 480
+
+      // Validate dimensions
+      if (videoWidth === 0 || videoHeight === 0) {
+        console.warn('Video dimensions are 0, using fallback dimensions')
+        reject(new Error('Video is not ready - dimensions are 0'))
+        return
+      }
+
+      // Check if video is playing/ready
+      if (videoElement.readyState < 2) { // HAVE_CURRENT_DATA
+        console.warn('Video not ready, readyState:', videoElement.readyState)
+        reject(new Error('Video is not ready'))
+        return
+      }
+
+      // Create canvas with exact video dimensions
+      const canvas = document.createElement('canvas')
+      canvas.width = videoWidth
+      canvas.height = videoHeight
+
+      const ctx = canvas.getContext('2d', {
+        alpha: false,  // Disable alpha for better performance
+        desynchronized: true,  // Allow async rendering for better performance
+        willReadFrequently: false  // We're not reading frequently
+      })
+
+      // Use high-quality image settings
+      // Smooth scaling for better image quality
+      ctx.imageSmoothingEnabled = true
+      ctx.imageSmoothingQuality = 'high'
+
+      // Draw video frame to canvas
+      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+
+      // Convert to JPEG with high quality (0.95 instead of 0.8 for better face detail)
+      // Higher quality preserves more face detail for detection
+      const imageData = canvas.toDataURL('image/jpeg', 0.95)
+      
+      if (!imageData || imageData.length < 100) {
+        reject(new Error('Failed to capture frame - image data is too small'))
+        return
+      }
+
+      // Log frame capture for debugging
+      console.debug(`Frame captured: ${videoWidth}x${videoHeight}, data length: ${imageData.length}`)
+
+      resolve(imageToBase64(imageData))
+    } catch (error) {
+      console.error('Error capturing frame:', error)
+      reject(error)
+    }
   })
 }
 
