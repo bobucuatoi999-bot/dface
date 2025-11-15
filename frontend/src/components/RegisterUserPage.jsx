@@ -153,17 +153,29 @@ function RegisterUserPage() {
       // Draw status text below
       ctx.font = '16px sans-serif'
       ctx.fillStyle = '#ffffff'
-      const statusText = meetsRequirements 
-        ? 'Requirements met - Recording...' 
-        : 'Adjust position to meet requirements'
+      let statusText = ''
+      if (isRecording) {
+        statusText = meetsRequirements 
+          ? 'Requirements met - Recording...' 
+          : 'Adjust position to meet requirements'
+      } else {
+        statusText = 'Position face in center - Ready to record'
+      }
       ctx.fillText(statusText, centerX, centerY + 15)
       
       // Draw requirement status
       ctx.font = '14px sans-serif'
       ctx.fillStyle = meetsRequirements ? '#00ff00' : '#ffaa00'
-      const requirementStatus = meetsRequirements
-        ? '✓ Ready to submit'
-        : '✗ Requirements not met'
+      let requirementStatus = ''
+      if (isRecording) {
+        requirementStatus = meetsRequirements
+          ? '✓ Ready to submit'
+          : '✗ Requirements not met'
+      } else {
+        requirementStatus = meetsRequirements
+          ? '✓ Ready to record'
+          : 'Adjust position before recording'
+      }
       ctx.fillText(requirementStatus, centerX, centerY + 40)
     }
     
