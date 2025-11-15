@@ -43,6 +43,54 @@ function RegisterUserPage() {
     }
   }, [])
 
+  // Draw circle guide (always visible when camera is active)
+  const drawCircleGuide = () => {
+    const canvas = canvasRef.current
+    const video = videoRef.current
+    if (!canvas || !video || !video.videoWidth || !video.videoHeight) return
+    
+    const ctx = canvas.getContext('2d')
+    
+    // Set canvas size to match video
+    canvas.width = video.videoWidth
+    canvas.height = video.videoHeight
+    
+    const canvasWidth = canvas.width
+    const canvasHeight = canvas.height
+    
+    const centerX = canvasWidth / 2
+    const centerY = canvasHeight / 2
+    
+    // Calculate optimal circle size based on optimal face size range
+    // Optimal face size: 150-350px, assume face takes ~40% of circle diameter
+    const optimalCircleRadius = 350 / 0.4 / 2 // ~437px radius
+    
+    // Draw guide circle (always visible when camera is active)
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)' // More visible white
+    ctx.lineWidth = 3
+    ctx.setLineDash([8, 4]) // Dashed line
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalCircleRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+    ctx.setLineDash([]) // Reset line style
+    
+    // Draw inner circle (optimal zone)
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.4)' // Green, more visible
+    ctx.lineWidth = 2
+    const optimalInnerRadius = 150 / 0.4 / 2 // ~187px radius
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalInnerRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+    
+    // Draw outer circle (max acceptable zone)
+    ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)' // Yellow, more visible
+    ctx.lineWidth = 2
+    const optimalOuterRadius = optimalCircleRadius * 1.2
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+  }
+
   // Draw face detection boxes, landmarks, and optimal position guide
   const drawFaceBoxes = (faces, imageSize) => {
     const canvas = canvasRef.current
@@ -61,41 +109,17 @@ function RegisterUserPage() {
     // Clear canvas
     ctx.clearRect(0, 0, canvasWidth, canvasHeight)
     
-    // Draw optimal position guide circle (centered)
+    // Always draw circle guide when camera is active
+    if (cameraActive) {
+      drawCircleGuide()
+    }
+    
+    // Draw optimal position guide circle center for reference
     const centerX = canvasWidth / 2
     const centerY = canvasHeight / 2
     
-    // Calculate optimal circle size based on optimal face size range
-    // Optimal face size: 150-350px, assume face takes ~40% of circle diameter
-    const optimalCircleRadius = 350 / 0.4 / 2 // ~437px radius
-    
-    // Draw guide circle (always visible)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)' // Semi-transparent white
-    ctx.lineWidth = 2
-    ctx.setLineDash([5, 5]) // Dashed line
-    ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalCircleRadius, 0, 2 * Math.PI)
-    ctx.stroke()
-    ctx.setLineDash([]) // Reset line style
-    
-    // Draw inner circle (optimal zone)
-    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)' // Green, very transparent
-    ctx.lineWidth = 1
-    const optimalInnerRadius = 150 / 0.4 / 2 // ~187px radius
-    ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalInnerRadius, 0, 2 * Math.PI)
-    ctx.stroke()
-    
-    // Draw outer circle (max acceptable zone)
-    ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)' // Yellow, very transparent
-    ctx.lineWidth = 1
-    const optimalOuterRadius = optimalCircleRadius * 1.2
-    ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
-    ctx.stroke()
-    
-    // Draw live feedback text inside/near circle during recording
-    if (isRecording) {
+    // Draw live feedback text inside/near circle (when camera is active, not just recording)
+    if (cameraActive) {
       // Background for text readability
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
       ctx.fillRect(centerX - 200, centerY - 60, 400, 120)
@@ -309,9 +333,9 @@ function RegisterUserPage() {
     }
   }
 
-  // Detect faces in video frame
+  // Detect faces in video frame (works when camera is active, not just recording)
   const detectFacesInFrame = async () => {
-    if (!videoRef.current || !isRecording || !cameraActive) return
+    if (!videoRef.current || !cameraActive) return
     
     try {
       // Capture frame
@@ -329,10 +353,13 @@ function RegisterUserPage() {
         drawFaceBoxes([], null)
       }
     } catch (error) {
-      // Silently handle errors to avoid interrupting recording
+      // Silently handle errors
       console.error('Face detection error:', error)
       setFaceDetectionStatus(null)
-      drawFaceBoxes([], null)
+      // Still draw circle guide even if detection fails
+      if (cameraActive) {
+        drawCircleGuide()
+      }
     }
   }
 
@@ -342,6 +369,27 @@ function RegisterUserPage() {
       const stream = await startCamera(videoRef.current)
       streamRef.current = stream
       setCameraActive(true)
+      
+      // Wait for video to be ready, then draw circle guide
+      const checkVideoReady = () => {
+        if (videoRef.current && videoRef.current.readyState >= 2) {
+          // Draw circle guide immediately when camera starts
+          setTimeout(() => {
+            drawCircleGuide()
+            setLiveFeedback('Position your face in the circle guide')
+          }, 100)
+        } else {
+          setTimeout(checkVideoReady, 100)
+        }
+      }
+      checkVideoReady()
+      
+      // Start continuous face detection when camera is active (even before recording)
+      // This allows users to see feedback and position correctly before recording
+      setFaceDetectionStatus('detecting')
+      detectionIntervalRef.current = setInterval(() => {
+        detectFacesInFrame()
+      }, 500) // Check every 500ms (2 FPS) when not recording - less frequent to save resources
     } catch (error) {
       setError('Could not access camera. Please allow camera permissions.')
     }
@@ -435,11 +483,15 @@ function RegisterUserPage() {
         }
       }, 100)
 
-      // Start face detection during recording (every 300ms = ~3 FPS)
+      // Increase face detection frequency during recording (every 300ms = ~3 FPS)
+      // If detection interval already exists (from camera start), clear it and restart with faster rate
+      if (detectionIntervalRef.current) {
+        clearInterval(detectionIntervalRef.current)
+      }
       setFaceDetectionStatus('detecting')
       detectionIntervalRef.current = setInterval(() => {
         detectFacesInFrame()
-      }, 300)
+      }, 300) // Faster detection during recording
 
       // Wait for recording to complete (will auto-stop at 7 seconds)
       const videoBlob = await promise
@@ -450,11 +502,9 @@ function RegisterUserPage() {
         timerRef.current = null
       }
       
-      // Stop face detection
-      if (detectionIntervalRef.current) {
-        clearInterval(detectionIntervalRef.current)
-        detectionIntervalRef.current = null
-      }
+      // Keep face detection running after recording (for preview with circle guide)
+      // Don't stop detection interval - it will continue showing feedback
+      // Only stop when camera is stopped
       
       // Clear canvas
       const canvas = canvasRef.current
