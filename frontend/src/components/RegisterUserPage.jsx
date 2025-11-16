@@ -63,12 +63,25 @@ function RegisterUserPage() {
     
     // Calculate circle sizes based on backend thresholds (must stay in sync with backend config)
     // Backend optimal face size range: 150-350 pixels (see OPTIMAL_FACE_SIZE_MIN/MAX)
-    // We approximate radius as half of these sizes so the face bounding box fits inside
+    // We use those as a base, then scale up visually so users are encouraged to fill more of the frame
     const OPTIMAL_FACE_SIZE_MIN = 150 // keep in sync with backend settings
     const OPTIMAL_FACE_SIZE_MAX = 350 // keep in sync with backend settings
     
-    const optimalInnerRadius = OPTIMAL_FACE_SIZE_MIN / 2 // inner circle ~ minimum optimal size
-    const optimalOuterRadius = OPTIMAL_FACE_SIZE_MAX / 2 // outer circle ~ maximum optimal size
+    const baseInnerRadius = OPTIMAL_FACE_SIZE_MIN / 2
+    const baseOuterRadius = OPTIMAL_FACE_SIZE_MAX / 2
+    
+    // Make the visual guide significantly larger while still fitting in the frame
+    const visualScale = 1.6 // >1.0 = bigger circles
+    let optimalInnerRadius = baseInnerRadius * visualScale
+    let optimalOuterRadius = baseOuterRadius * visualScale
+    
+    // Ensure circles do not exceed the canvas
+    const maxRadius = Math.min(canvasWidth, canvasHeight) * 0.45
+    if (optimalOuterRadius > maxRadius) {
+      const scale = maxRadius / optimalOuterRadius
+      optimalOuterRadius = optimalOuterRadius * scale
+      optimalInnerRadius = optimalInnerRadius * scale
+    }
     
     // Draw guide circle (always visible when camera is active)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)' // More visible white
@@ -398,10 +411,11 @@ function RegisterUserPage() {
       // Wait for video to be ready, then draw circle guide
       const checkVideoReady = () => {
         if (videoRef.current && videoRef.current.readyState >= 2) {
-          // Draw circle guide immediately when camera starts
+          // Draw circle guide and initial live feedback immediately when camera starts
           setTimeout(() => {
-            drawCircleGuide()
             setLiveFeedback('Position your face in the circle guide')
+            // Use drawFaceBoxes with an empty face list so the overlay + text are rendered
+            drawFaceBoxes([], null)
           }, 100)
         } else {
           setTimeout(checkVideoReady, 100)
