@@ -20,6 +20,7 @@ function RegisterUserPage() {
   const [meetsRequirements, setMeetsRequirements] = useState(false) // Track if face meets quality requirements
   const [liveFeedback, setLiveFeedback] = useState('') // Live feedback text shown in circle
   const requirementsMetRef = useRef(false) // Track best status during recording
+  const goodFrameCountRef = useRef(0) // Count of frames that met requirements during current recording
   
   const videoRef = useRef(null)
   const streamRef = useRef(null)
@@ -134,75 +135,8 @@ function RegisterUserPage() {
     const centerX = canvasWidth / 2
     const centerY = canvasHeight / 2
     
-    // Draw live feedback text inside/near circle (when camera is active, not just recording)
-    if (cameraActive) {
-      // Background for text readability
-      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
-      ctx.fillRect(centerX - 220, centerY - 70, 440, 140)
-      
-      // Text styling
-      ctx.fillStyle = '#ffffff'
-      ctx.font = 'bold 20px sans-serif'
-      ctx.textAlign = 'center'
-      ctx.textBaseline = 'middle'
-      
-      // Draw main feedback message
-      let feedbackText = liveFeedback || 'Position your face in the circle'
-      let feedbackColor = '#ffffff'
-      
-      if (meetsRequirements) {
-        feedbackText = '✅ Perfect! Keep your position'
-        feedbackColor = '#00ff00'
-      } else if (liveFeedback) {
-        if (liveFeedback.includes('Too Far')) {
-          feedbackColor = '#ffaa00' // Orange
-        } else if (liveFeedback.includes('Too Close')) {
-          feedbackColor = '#ffaa00' // Orange
-        } else if (liveFeedback.includes('No face')) {
-          feedbackColor = '#ff4444' // Red
-        }
-      }
-      
-      ctx.fillStyle = feedbackColor
-      ctx.fillText(feedbackText, centerX, centerY - 20)
-      
-      // Draw status text below
-      ctx.font = '16px sans-serif'
-      ctx.fillStyle = '#ffffff'
-      let statusText = ''
-      if (isRecording) {
-        statusText = meetsRequirements 
-          ? 'Requirements met - Recording...' 
-          : 'Adjust position to meet requirements'
-      } else {
-        statusText = 'Position face in center - Ready to record'
-      }
-      ctx.fillText(statusText, centerX, centerY + 5)
-      
-      // Draw requirement status
-      ctx.font = '14px sans-serif'
-      ctx.fillStyle = meetsRequirements ? '#00ff00' : '#ffaa00'
-      let requirementStatus = ''
-      if (isRecording) {
-        requirementStatus = meetsRequirements
-          ? '✓ Ready to submit'
-          : '✗ Requirements not met'
-      } else {
-        requirementStatus = meetsRequirements
-          ? '✓ Ready to record'
-          : 'Adjust position before recording'
-      }
-      ctx.fillText(requirementStatus, centerX, centerY + 30)
-      
-      // Optional debug info: show raw face size and quality if available
-      if (bestFace && bestFace.position_status) {
-        const debug = bestFace.position_status
-        ctx.font = '12px monospace'
-        ctx.fillStyle = '#dddddd'
-        const debugText = `size=${debug.face_size || '?'} | quality=${debug.quality_status || '?'} | dist=${debug.distance_status || '?'}`
-        ctx.fillText(debugText, centerX, centerY + 50)
-      }
-    }
+    // We'll store the best face for debug overlay
+    let debugFace = null
     
     if (faces && faces.length > 0) {
       let bestFace = null
@@ -227,6 +161,7 @@ function RegisterUserPage() {
       })
       
       if (bestFace) {
+        debugFace = bestFace
         const face = bestFace
         const [top, right, bottom, left] = face.bbox
         const width = right - left
@@ -243,13 +178,36 @@ function RegisterUserPage() {
           (distanceStatus === 'perfect' || distanceStatus === 'acceptable')
         )
         
-        // Update requirements status (keep best status during recording)
-        if (currentMeetsRequirements) {
-          requirementsMetRef.current = true
-          setMeetsRequirements(true)
-        } else if (!requirementsMetRef.current) {
-          // Only update to false if we haven't met requirements yet
-          setMeetsRequirements(false)
+        // Log raw values for debugging/tuning
+        console.debug('Face position status:', {
+          faceSize: posStatus.face_size,
+          distanceStatus,
+          qualityStatus,
+          positionStatus: posStatus.position_status,
+          centerOffset: posStatus.center_offset,
+          isRecording,
+          currentMeetsRequirements,
+          goodFrameCount: goodFrameCountRef.current,
+          requirementsMet: requirementsMetRef.current,
+        })
+        
+        // Update requirements status:
+        // - Before recording: reflect current status directly (for UX)
+        // - During recording: require several good frames to be more robust but still achievable
+        if (!isRecording) {
+          setMeetsRequirements(currentMeetsRequirements)
+        } else {
+          if (currentMeetsRequirements) {
+            goodFrameCountRef.current += 1
+          }
+          
+          if (goodFrameCountRef.current >= 3) {
+            requirementsMetRef.current = true
+            setMeetsRequirements(true)
+          } else if (!requirementsMetRef.current) {
+            // Only update to false if we haven't locked in good frames yet
+            setMeetsRequirements(false)
+          }
         }
         
         // Choose color based on quality
@@ -367,6 +325,77 @@ function RegisterUserPage() {
         drawCircleGuide()
       } else {
         setError('⚠️ No face detected - Position your face in the center')
+      }
+    }
+
+    // Draw live feedback text and debug info after we've processed faces
+    if (cameraActive) {
+      // Background for text readability
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+      ctx.fillRect(centerX - 230, centerY - 75, 460, 150)
+      
+      // Text styling
+      ctx.fillStyle = '#ffffff'
+      ctx.font = 'bold 20px sans-serif'
+      ctx.textAlign = 'center'
+      ctx.textBaseline = 'middle'
+      
+      // Draw main feedback message
+      let feedbackText = liveFeedback || 'Position your face in the circle'
+      let feedbackColor = '#ffffff'
+      
+      if (meetsRequirements) {
+        feedbackText = '✅ Perfect! Keep your position'
+        feedbackColor = '#00ff00'
+      } else if (liveFeedback) {
+        if (liveFeedback.includes('Too Far')) {
+          feedbackColor = '#ffaa00' // Orange
+        } else if (liveFeedback.includes('Too Close')) {
+          feedbackColor = '#ffaa00' // Orange
+        } else if (liveFeedback.includes('No face')) {
+          feedbackColor = '#ff4444' // Red
+        }
+      }
+      
+      ctx.fillStyle = feedbackColor
+      ctx.fillText(feedbackText, centerX, centerY - 22)
+      
+      // Draw status text below
+      ctx.font = '16px sans-serif'
+      ctx.fillStyle = '#ffffff'
+      let statusText = ''
+      if (isRecording) {
+        statusText = meetsRequirements 
+          ? 'Requirements met - Recording...'
+          : 'Adjust position to meet requirements'
+      } else {
+        statusText = 'Position face in center - Ready to record'
+      }
+      ctx.fillText(statusText, centerX, centerY + 2)
+      
+      // Draw requirement status
+      ctx.font = '14px sans-serif'
+      ctx.fillStyle = meetsRequirements ? '#00ff00' : '#ffaa00'
+      let requirementStatus = ''
+      if (isRecording) {
+        const goodFrames = goodFrameCountRef.current
+        requirementStatus = meetsRequirements
+          ? `✓ Ready to submit (good frames: ${goodFrames})`
+          : `Recording... good frames: ${goodFrames}/3`
+      } else {
+        requirementStatus = meetsRequirements
+          ? '✓ Ready to record'
+          : 'Adjust position before recording'
+      }
+      ctx.fillText(requirementStatus, centerX, centerY + 30)
+      
+      // Optional debug info: show raw face size and quality if available
+      if (debugFace && debugFace.position_status) {
+        const debug = debugFace.position_status
+        ctx.font = '12px monospace'
+        ctx.fillStyle = '#dddddd'
+        const debugText = `size=${debug.face_size || '?'} | quality=${debug.quality_status || '?'} | dist=${debug.distance_status || '?'}`
+        ctx.fillText(debugText, centerX, centerY + 52)
       }
     }
   }
@@ -496,6 +525,7 @@ function RegisterUserPage() {
       setVideoDuration(0)
       setMeetsRequirements(false) // Reset requirements status
       requirementsMetRef.current = false // Reset requirements ref
+      goodFrameCountRef.current = 0 // Reset good frame counter
       setLiveFeedback('Detecting face...') // Initial feedback
 
       // Start video recording (7 seconds duration)
