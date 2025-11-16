@@ -61,33 +61,36 @@ function RegisterUserPage() {
     const centerX = canvasWidth / 2
     const centerY = canvasHeight / 2
     
-    // Calculate optimal circle size based on optimal face size range
-    // Optimal face size: 150-350px, assume face takes ~40% of circle diameter
-    const optimalCircleRadius = 350 / 0.4 / 2 // ~437px radius
+    // Calculate circle sizes based on backend thresholds (must stay in sync with backend config)
+    // Backend optimal face size range: 150-350 pixels (see OPTIMAL_FACE_SIZE_MIN/MAX)
+    // We approximate radius as half of these sizes so the face bounding box fits inside
+    const OPTIMAL_FACE_SIZE_MIN = 150 // keep in sync with backend settings
+    const OPTIMAL_FACE_SIZE_MAX = 350 // keep in sync with backend settings
+    
+    const optimalInnerRadius = OPTIMAL_FACE_SIZE_MIN / 2 // inner circle ~ minimum optimal size
+    const optimalOuterRadius = OPTIMAL_FACE_SIZE_MAX / 2 // outer circle ~ maximum optimal size
     
     // Draw guide circle (always visible when camera is active)
     ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)' // More visible white
     ctx.lineWidth = 3
     ctx.setLineDash([8, 4]) // Dashed line
     ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalCircleRadius, 0, 2 * Math.PI)
+    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
     ctx.stroke()
     ctx.setLineDash([]) // Reset line style
     
     // Draw inner circle (optimal zone)
     ctx.strokeStyle = 'rgba(0, 255, 0, 0.4)' // Green, more visible
     ctx.lineWidth = 2
-    const optimalInnerRadius = 150 / 0.4 / 2 // ~187px radius
     ctx.beginPath()
     ctx.arc(centerX, centerY, optimalInnerRadius, 0, 2 * Math.PI)
     ctx.stroke()
     
-    // Draw outer circle (max acceptable zone)
+    // Draw mid circle (visual helper between inner and outer)
     ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)' // Yellow, more visible
     ctx.lineWidth = 2
-    const optimalOuterRadius = optimalCircleRadius * 1.2
     ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
+    ctx.arc(centerX, centerY, (optimalInnerRadius + optimalOuterRadius) / 2, 0, 2 * Math.PI)
     ctx.stroke()
   }
 
@@ -122,7 +125,7 @@ function RegisterUserPage() {
     if (cameraActive) {
       // Background for text readability
       ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
-      ctx.fillRect(centerX - 200, centerY - 60, 400, 120)
+      ctx.fillRect(centerX - 220, centerY - 70, 440, 140)
       
       // Text styling
       ctx.fillStyle = '#ffffff'
@@ -148,7 +151,7 @@ function RegisterUserPage() {
       }
       
       ctx.fillStyle = feedbackColor
-      ctx.fillText(feedbackText, centerX, centerY - 15)
+      ctx.fillText(feedbackText, centerX, centerY - 20)
       
       // Draw status text below
       ctx.font = '16px sans-serif'
@@ -161,7 +164,7 @@ function RegisterUserPage() {
       } else {
         statusText = 'Position face in center - Ready to record'
       }
-      ctx.fillText(statusText, centerX, centerY + 15)
+      ctx.fillText(statusText, centerX, centerY + 5)
       
       // Draw requirement status
       ctx.font = '14px sans-serif'
@@ -176,7 +179,16 @@ function RegisterUserPage() {
           ? '✓ Ready to record'
           : 'Adjust position before recording'
       }
-      ctx.fillText(requirementStatus, centerX, centerY + 40)
+      ctx.fillText(requirementStatus, centerX, centerY + 30)
+      
+      // Optional debug info: show raw face size and quality if available
+      if (bestFace && bestFace.position_status) {
+        const debug = bestFace.position_status
+        ctx.font = '12px monospace'
+        ctx.fillStyle = '#dddddd'
+        const debugText = `size=${debug.face_size || '?'} | quality=${debug.quality_status || '?'} | dist=${debug.distance_status || '?'}`
+        ctx.fillText(debugText, centerX, centerY + 50)
+      }
     }
     
     if (faces && faces.length > 0) {
@@ -212,10 +224,10 @@ function RegisterUserPage() {
         const sizeStatus = posStatus.size_status || 'acceptable'
         
         // Check if requirements are met (for submit button)
-        // Requirements: quality_status must be 'excellent' or 'good', distance_status must be 'perfect'
+        // Relaxed: allow "fair" quality and "acceptable" distance so it's easier for users
         const currentMeetsRequirements = (
-          (qualityStatus === 'excellent' || qualityStatus === 'good') &&
-          distanceStatus === 'perfect'
+          (qualityStatus === 'excellent' || qualityStatus === 'good' || qualityStatus === 'fair') &&
+          (distanceStatus === 'perfect' || distanceStatus === 'acceptable')
         )
         
         // Update requirements status (keep best status during recording)
