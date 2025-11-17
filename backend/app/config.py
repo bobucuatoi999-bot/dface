@@ -42,6 +42,18 @@ class Settings(BaseSettings):
         default=30,
         description="WebSocket heartbeat interval in seconds"
     )
+    WS_TIMEOUT: int = Field(
+        default=300,
+        description="WebSocket connection timeout in seconds (5 minutes)"
+    )
+    WS_PING_INTERVAL: int = Field(
+        default=20,
+        description="WebSocket ping interval in seconds"
+    )
+    WS_PING_TIMEOUT: int = Field(
+        default=10,
+        description="WebSocket ping timeout in seconds"
+    )
     
     # Face Recognition Settings (for Phase 2)
     FACE_RECOGNITION_MODEL: str = Field(
@@ -49,11 +61,11 @@ class Settings(BaseSettings):
         description="Face detection model: 'hog' or 'cnn'"
     )
     FACE_MATCH_THRESHOLD: float = Field(
-        default=0.6,
+        default=0.7,  # Increased from 0.6 (less strict)
         description="Face matching threshold (lower = more strict)"
     )
     FACE_CONFIDENCE_THRESHOLD: float = Field(
-        default=0.85,
+        default=0.70,  # Decreased from 0.85 (more lenient)
         description="Minimum confidence for identification"
     )
     

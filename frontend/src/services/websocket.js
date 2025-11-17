@@ -2,6 +2,29 @@
  * WebSocket service for real-time recognition
  */
 
+const getWebSocketUrl = () => {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+  const host = window.location.hostname
+
+  if (import.meta.env.VITE_WS_URL) {
+    return import.meta.env.VITE_WS_URL
+  }
+
+  if (host.includes('railway.app') || host.includes('up.railway.app')) {
+    return `${protocol}//${host}/ws/recognize`
+  }
+
+  if (import.meta.env.VITE_API_URL && import.meta.env.VITE_API_URL.includes('railway')) {
+    const apiUrl = new URL(import.meta.env.VITE_API_URL)
+    return `wss://${apiUrl.host}/ws/recognize`
+  }
+
+  return 'ws://localhost:8000/ws/recognize'
+}
+
+const wsUrl = getWebSocketUrl()
+console.log('WebSocket URL:', wsUrl)
+
 class RecognitionWebSocket {
   constructor() {
     this.ws = null
@@ -10,18 +33,34 @@ class RecognitionWebSocket {
     this.onConnectionChange = null
     this.reconnectAttempts = 0
     this.maxReconnectAttempts = 5
+    this.heartbeatInterval = null
+  }
+
+  startHeartbeat() {
+    this.stopHeartbeat()
+    this.heartbeatInterval = setInterval(() => {
+      if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+        this.ping()
+      }
+    }, 25000)
+  }
+
+  stopHeartbeat() {
+    if (this.heartbeatInterval) {
+      clearInterval(this.heartbeatInterval)
+      this.heartbeatInterval = null
+    }
   }
 
   connect() {
     return new Promise((resolve, reject) => {
-      const wsUrl = import.meta.env.VITE_WS_URL || 'ws://localhost:8000/ws/recognize'
-      
       try {
         this.ws = new WebSocket(wsUrl)
         
         this.ws.onopen = () => {
-          console.log('WebSocket connected')
+          console.log('✅ WebSocket connected to:', wsUrl)
           this.reconnectAttempts = 0
+          this.startHeartbeat()
           if (this.onConnectionChange) {
             this.onConnectionChange(true)
           }
@@ -46,7 +85,8 @@ class RecognitionWebSocket {
         }
         
         this.ws.onclose = () => {
-          console.log('WebSocket disconnected')
+          console.log('❌ WebSocket disconnected')
+          this.stopHeartbeat()
           if (this.onConnectionChange) {
             this.onConnectionChange(false)
           }
@@ -54,8 +94,10 @@ class RecognitionWebSocket {
           // Attempt reconnect
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             this.reconnectAttempts++
-            console.log(`Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
+            console.log(`🔄 Reconnecting... (${this.reconnectAttempts}/${this.maxReconnectAttempts})`)
             setTimeout(() => this.connect(), 3000)
+          } else {
+            console.error('⚠️ Max reconnection attempts reached. Please refresh the page.')
           }
         }
       } catch (error) {
@@ -121,6 +163,7 @@ class RecognitionWebSocket {
   }
 
   disconnect() {
+    this.stopHeartbeat()
     if (this.ws) {
       this.ws.close()
       this.ws = null

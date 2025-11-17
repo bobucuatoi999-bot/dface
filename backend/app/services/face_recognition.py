@@ -77,48 +77,57 @@ class FaceRecognitionService:
     
     def compare_faces(self, known_encoding: np.ndarray, unknown_encoding: np.ndarray) -> Tuple[bool, float]:
         """
-        Compare two face embeddings.
+        Compare two face embeddings using a weighted distance + improved confidence.
         
         Args:
             known_encoding: Known face embedding (128-dim)
             unknown_encoding: Unknown face embedding (128-dim)
             
         Returns:
-            Tuple of (is_match: bool, distance: float)
-            Lower distance = more similar (0.0 = identical, 1.0+ = very different)
+            Tuple of (is_match: bool, confidence: float)
         """
         try:
-            # Calculate Euclidean distance
-            distance = face_recognition.face_distance([known_encoding], unknown_encoding)[0]
+            # Euclidean distance (lower = more similar)
+            euclidean_distance = face_recognition.face_distance([known_encoding], unknown_encoding)[0]
             
-            # Normalize encodings for better comparison (unit vectors)
+            # Cosine distance (converted from similarity)
             known_norm = np.linalg.norm(known_encoding)
             unknown_norm = np.linalg.norm(unknown_encoding)
-            
             if known_norm > 0 and unknown_norm > 0:
-                # Normalize to unit vectors
                 known_normalized = known_encoding / known_norm
                 unknown_normalized = unknown_encoding / unknown_norm
-                
-                # Calculate cosine similarity (dot product of normalized vectors)
                 cosine_similarity = np.dot(known_normalized, unknown_normalized)
-                
-                # Convert cosine similarity to distance (lower = better)
-                # Cosine similarity ranges from -1 to 1, we want 0-1 scale
-                cosine_distance = 1.0 - ((cosine_similarity + 1.0) / 2.0)
-                
-                # Use the average of Euclidean and cosine distance for better accuracy
-                combined_distance = (distance + cosine_distance) / 2.0
+                cosine_distance = (1.0 - cosine_similarity) / 2.0
+                combined_distance = (0.7 * euclidean_distance) + (0.3 * cosine_distance)
             else:
-                combined_distance = distance
+                cosine_distance = None
+                combined_distance = euclidean_distance
             
-            # Check if distance is below threshold
             is_match = combined_distance <= self.match_threshold
             
-            # Convert distance to confidence (0.0 to 1.0)
-            # Use exponential decay for smoother confidence curve
-            # Lower distance = higher confidence
-            confidence = max(0.0, min(1.0, np.exp(-combined_distance / (self.match_threshold * 0.5))))
+            # Improved confidence curve (sigmoid-like)
+            if combined_distance < 0.3:
+                confidence = 0.95 + (0.05 * (0.3 - combined_distance) / 0.3)
+            elif combined_distance < 0.5:
+                confidence = 0.80 + (0.15 * (0.5 - combined_distance) / 0.2)
+            elif combined_distance < self.match_threshold:
+                confidence = 0.70 + (0.10 * (self.match_threshold - combined_distance) / (self.match_threshold - 0.5))
+            else:
+                confidence = max(0.0, 0.70 - (combined_distance - self.match_threshold) / self.match_threshold)
+            
+            confidence = max(0.0, min(1.0, confidence))
+            
+            if cosine_distance is not None:
+                logger.debug(
+                    f"Face comparison: euclidean={euclidean_distance:.4f}, "
+                    f"cosine={cosine_distance:.4f}, combined={combined_distance:.4f}, "
+                    f"match={is_match}, confidence={confidence:.4f}"
+                )
+            else:
+                logger.debug(
+                    f"Face comparison: euclidean={euclidean_distance:.4f}, "
+                    f"combined={combined_distance:.4f}, match={is_match}, confidence={confidence:.4f}"
+                )
             
             return is_match, confidence
             
