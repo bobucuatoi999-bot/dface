@@ -35,7 +35,8 @@ try:
     import face_recognition
     from app.utils.image_processing import (
         decode_base64_image, resize_image, check_face_size, 
-        calculate_image_quality, calculate_face_position_status
+        calculate_image_quality, calculate_face_position_status,
+        enhance_image_for_detection
     )
     FACE_RECOGNITION_AVAILABLE = True
 except ImportError as e:
@@ -518,15 +519,18 @@ async def websocket_recognize(websocket: WebSocket):
                                f"image={width}x{height}, dtype={image.dtype}, "
                                f"mean={image.mean():.2f}, std={image.std():.2f}")
                     
-                    # Resize if too large (for performance) - but preserve quality
+                    # Enhance image for better detection (CLAHE + adaptive adjustments)
+                    image = enhance_image_for_detection(image)
+                    
+                    # Resize if too large (optimize for speed while preserving detail)
                     original_size = max(width, height) if width > 0 and height > 0 else 0
-                    image = resize_image(image, max_size=1920)
+                    image = resize_image(image, max_size=1280)
                     resized_height, resized_width = image.shape[:2] if len(image.shape) >= 2 else (0, 0)
                     if original_size != max(resized_width, resized_height):
-                        logger.debug(f"Image resized: {original_size}px → {max(resized_width, resized_height)}px")
+                        logger.debug(f"Image resized: {original_size}px → {max(resized_width, resized_height)}px for detection")
                     
                     # Detect faces with enhanced upsampling (now set to 2x in face_detection.py)
-                    logger.debug(f"Starting face detection on {resized_width}x{resized_height} image")
+                    logger.debug(f"Starting face detection on {resized_width}x{resized_height} enhanced image")
                     face_locations = face_detection_service.detect_faces(image)
                     
                     # Log detection results
@@ -640,8 +644,8 @@ async def websocket_recognize(websocket: WebSocket):
                         try:
                             position_status = calculate_face_position_status(
                                 track.bbox,
-                                width,
-                                height,
+                                resized_width,
+                                resized_height,
                                 optimal_size_min=settings.OPTIMAL_FACE_SIZE_MIN,
                                 optimal_size_max=settings.OPTIMAL_FACE_SIZE_MAX
                             )

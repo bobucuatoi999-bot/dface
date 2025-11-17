@@ -8,6 +8,7 @@ function RecognitionPage() {
   const [connected, setConnected] = useState(false)
   const [faces, setFaces] = useState([])
   const [stats, setStats] = useState({ totalFrames: 0, totalFaces: 0 })
+  const [liveFeedback, setLiveFeedback] = useState('Position your face inside the circle')
   
   const videoRef = useRef(null)
   const canvasRef = useRef(null)
@@ -35,6 +36,52 @@ function RecognitionPage() {
     }
   }
 
+  const OPTIMAL_FACE_SIZE_MIN = 150
+  const OPTIMAL_FACE_SIZE_MAX = 350
+  const visualScale = 1.6
+
+  const drawCircleGuide = (ctx, canvasWidth, canvasHeight) => {
+    const centerX = canvasWidth / 2
+    const centerY = canvasHeight / 2
+
+    const baseInnerRadius = OPTIMAL_FACE_SIZE_MIN / 2
+    const baseOuterRadius = OPTIMAL_FACE_SIZE_MAX / 2
+
+    let optimalInnerRadius = baseInnerRadius * visualScale
+    let optimalOuterRadius = baseOuterRadius * visualScale
+
+    const maxRadius = Math.min(canvasWidth, canvasHeight) * 0.45
+    if (optimalOuterRadius > maxRadius) {
+      const scale = maxRadius / optimalOuterRadius
+      optimalOuterRadius *= scale
+      optimalInnerRadius *= scale
+    }
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)'
+    ctx.lineWidth = 3
+    ctx.setLineDash([8, 4])
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+    ctx.setLineDash([])
+
+    ctx.strokeStyle = 'rgba(0, 255, 0, 0.4)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, optimalInnerRadius, 0, 2 * Math.PI)
+    ctx.stroke()
+
+    ctx.strokeStyle = 'rgba(255, 255, 0, 0.4)'
+    ctx.lineWidth = 2
+    ctx.beginPath()
+    ctx.arc(centerX, centerY, (optimalInnerRadius + optimalOuterRadius) / 2, 0, 2 * Math.PI)
+    ctx.stroke()
+  }
+
+  const updateLiveFeedback = (message) => {
+    setLiveFeedback(prev => (prev === message ? prev : message))
+  }
+
   const drawBoundingBoxes = (detectedFaces) => {
     const canvas = canvasRef.current
     const video = videoRef.current
@@ -47,57 +94,91 @@ function RecognitionPage() {
     const canvasWidth = canvas.width
     const canvasHeight = canvas.height
 
-    // Clear canvas
     ctx.clearRect(0, 0, canvasWidth, canvasHeight)
+    drawCircleGuide(ctx, canvasWidth, canvasHeight)
 
-    // Draw optimal position guide circle (centered)
     const centerX = canvasWidth / 2
     const centerY = canvasHeight / 2
-    
-    // Calculate optimal circle size based on optimal face size range
-    // Optimal face size: 150-350px, assume face takes ~40% of circle diameter
-    const optimalCircleRadius = 350 / 0.4 / 2 // ~437px radius
-    
-    // Draw guide circle (always visible)
-    ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)' // Semi-transparent white
-    ctx.lineWidth = 2
-    ctx.setLineDash([5, 5]) // Dashed line
-    ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalCircleRadius, 0, 2 * Math.PI)
-    ctx.stroke()
-    ctx.setLineDash([]) // Reset line style
-    
-    // Draw inner circle (optimal zone)
-    ctx.strokeStyle = 'rgba(0, 255, 0, 0.3)' // Green, very transparent
-    ctx.lineWidth = 1
-    const optimalInnerRadius = 150 / 0.4 / 2 // ~187px radius
-    ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalInnerRadius, 0, 2 * Math.PI)
-    ctx.stroke()
-    
-    // Draw outer circle (max acceptable zone)
-    ctx.strokeStyle = 'rgba(255, 255, 0, 0.3)' // Yellow, very transparent
-    ctx.lineWidth = 1
-    const optimalOuterRadius = optimalCircleRadius * 1.2
-    ctx.beginPath()
-    ctx.arc(centerX, centerY, optimalOuterRadius, 0, 2 * Math.PI)
-    ctx.stroke()
 
-    // Draw bounding boxes with landmarks if available
+    let bestFace = null
+    let bestScore = -Infinity
+    let overlayMessage = 'Position your face inside the circle'
+    let overlayStatus = ''
+    let overlayDetail = ''
+
+    detectedFaces.forEach((face) => {
+      const posStatus = face.position_status || {}
+      let score = 0
+
+      if (posStatus.quality_status === 'excellent') score += 3
+      else if (posStatus.quality_status === 'good') score += 2
+      else if (posStatus.quality_status === 'fair') score += 1
+
+      if (posStatus.distance_status === 'perfect') score += 2
+      else if (posStatus.distance_status === 'acceptable') score += 1
+
+      if (!face.is_unknown) score += 0.5
+      if (face.confidence) score += face.confidence
+
+      if (score > bestScore) {
+        bestScore = score
+        bestFace = face
+      }
+    })
+
+    if (!detectedFaces || detectedFaces.length === 0) {
+      overlayMessage = 'No face detected - align your face within the circle'
+      updateLiveFeedback(overlayMessage)
+      overlayStatus = 'No face detected'
+      // no best face info to store
+    } else if (bestFace && bestFace.position_status) {
+      const distanceStatus = bestFace.position_status.distance_status || 'acceptable'
+      const qualityStatus = bestFace.position_status.quality_status || 'fair'
+      const positionStatus = bestFace.position_status.position_status || 'centered'
+
+      if (distanceStatus === 'perfect' && positionStatus === 'centered') {
+        overlayMessage = '✅ Perfect! Hold still for accurate recognition'
+      } else if (distanceStatus === 'too_far') {
+        overlayMessage = '⚠️ Move closer to fill the circle'
+      } else if (distanceStatus === 'too_close') {
+        overlayMessage = '⚠️ Move slightly back'
+      } else if (qualityStatus === 'fair') {
+        overlayMessage = 'ℹ️ Lighting could be improved, but still acceptable'
+      } else if (positionStatus === 'off_center') {
+        overlayMessage = '↔ Center your face inside the circle'
+      } else {
+        overlayMessage = 'Adjust slightly to stay within the circle'
+      }
+
+      overlayStatus = `Distance: ${distanceStatus} | Position: ${positionStatus}`
+      overlayDetail = `size=${bestFace.position_status.face_size || '?'} | quality=${bestFace.position_status.quality_status || '?'}`
+      updateLiveFeedback(overlayMessage)
+    } else {
+      overlayMessage = 'Face detected - adjusting positioning...'
+      overlayStatus = 'Align face with the guide'
+      updateLiveFeedback(overlayMessage)
+      // keep guidance general when no detailed status
+    }
+
     detectedFaces.forEach((face) => {
       const [top, right, bottom, left] = face.bbox
       const width = right - left
       const height = bottom - top
+      const posStatus = face.position_status || {}
+      const distanceStatus = posStatus.distance_status || 'acceptable'
+      const qualityStatus = posStatus.quality_status || 'fair'
 
-      // Choose color based on recognition status
-      let color = '#ff4444' // Red for unknown
-      if (!face.is_unknown && face.confidence > 0.85) {
-        color = '#44ff44' // Green for recognized
+      let color = '#ff4444'
+      if (distanceStatus === 'perfect' && qualityStatus !== 'poor') {
+        color = '#00ff88'
+      } else if (distanceStatus === 'acceptable') {
+        color = '#ffaa00'
+      } else if (!face.is_unknown && face.confidence > 0.85) {
+        color = '#44ff44'
       } else if (!face.is_unknown) {
-        color = '#ffaa00' // Yellow for uncertain
+        color = '#ffaa00'
       }
 
-      // Draw bounding box
       ctx.strokeStyle = color
       ctx.lineWidth = 3
       ctx.strokeRect(left, top, width, height)
@@ -140,7 +221,6 @@ function RecognitionPage() {
         })
       }
 
-      // Draw label background
       const labelText = face.is_unknown
         ? 'Unknown'
         : `${face.user_name} (${(face.confidence * 100).toFixed(0)}%)`
@@ -148,11 +228,35 @@ function RecognitionPage() {
       ctx.fillStyle = color
       ctx.fillRect(left, top - 30, Math.max(150, labelText.length * 8), 30)
 
-      // Draw label text
       ctx.fillStyle = 'white'
       ctx.font = 'bold 16px sans-serif'
       ctx.fillText(labelText, left + 5, top - 8)
+
+      if (posStatus && posStatus.distance_status) {
+        const diagnostic = `size=${posStatus.face_size || '?'} dist=${posStatus.distance_status} quality=${posStatus.quality_status}`
+        ctx.font = '12px monospace'
+        ctx.fillStyle = '#ffffff'
+        ctx.fillText(diagnostic, left + 5, top + height + 18)
+      }
     })
+
+    // Draw live feedback overlay inside circle
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)'
+    ctx.fillRect(centerX - 230, centerY - 75, 460, 150)
+
+    ctx.fillStyle = '#ffffff'
+    ctx.font = 'bold 20px sans-serif'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+
+    ctx.fillText(overlayMessage || 'Position your face in the circle', centerX, centerY - 20)
+
+    ctx.font = '16px sans-serif'
+    ctx.fillText(overlayStatus || (detectedFaces && detectedFaces.length > 0 ? 'Align face with the guide' : 'No face detected'), centerX, centerY + 5)
+
+    ctx.font = '14px sans-serif'
+    ctx.fillStyle = '#dddddd'
+    ctx.fillText(overlayDetail || 'Tip: Keep your face steady inside the circle', centerX, centerY + 28)
   }
 
   const startRecognition = async () => {
@@ -219,7 +323,7 @@ function RecognitionPage() {
           {isActive && (
             <div className="position-guide-info">
               <p className="guide-text">
-                📍 Position your face within the white circle guide for best recognition
+                {liveFeedback || '📍 Position your face within the white circle guide for best recognition'}
               </p>
             </div>
           )}
