@@ -172,7 +172,12 @@ function RecognitionPage() {
       frameIntervalRef.current = setInterval(async () => {
         if (videoRef.current && videoRef.current.readyState === 4) {
           try {
-            const imageData = await captureFrame(videoRef.current)
+            // Capture frame optimized for detection (smaller size, faster processing)
+            const imageData = await captureFrame(videoRef.current, {
+              forDetection: true,  // Optimize for detection
+              maxSize: 960,  // Resize to max 960px for faster processing
+              quality: 0.85  // Lower JPEG quality for faster upload/processing
+            })
             const base64Image = imageToBase64(imageData)
             wsService.sendFrame(base64Image, frameId++, Date.now())
           } catch (error) {

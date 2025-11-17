@@ -405,8 +405,13 @@ function RegisterUserPage() {
     if (!videoRef.current || !cameraActive) return
     
     try {
-      // Capture frame
-      const imageData = await captureFrame(videoRef.current)
+      // Capture frame optimized for detection (smaller size, faster processing)
+      // This speeds up face detection significantly while maintaining accuracy
+      const imageData = await captureFrame(videoRef.current, {
+        forDetection: true,  // Optimize for detection
+        maxSize: 960,  // Resize to max 960px for faster processing
+        quality: 0.85  // Lower JPEG quality for faster upload/processing
+      })
       const base64Image = imageToBase64(imageData)
       
       // Call enhanced face detection API (now returns landmarks and position status)

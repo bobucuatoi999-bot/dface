@@ -26,7 +26,7 @@ try:
     from app.services.face_recognition import FaceRecognitionService
     from app.utils.image_processing import (
         decode_base64_image, calculate_image_quality, check_face_size,
-        calculate_face_position_status
+        calculate_face_position_status, enhance_image_for_detection, resize_image
     )
     from app.utils.video_processing import (
         decode_base64_video, extract_frames_from_video, 
@@ -697,8 +697,43 @@ async def detect_faces_endpoint(
         image = decode_base64_image(image_data)
         height, width = image.shape[:2]
         
-        # Detect faces with landmarks
-        face_locations, face_landmarks_list = face_detection_service.detect_faces_with_landmarks(image)
+        # Enhance image for better detection (especially in low-light conditions)
+        # This uses CLAHE and adaptive brightness/contrast adjustment
+        enhanced_image = enhance_image_for_detection(image)
+        
+        # Resize image if too large for faster processing (max 960px for detection)
+        # This speeds up detection significantly while maintaining accuracy
+        # Full resolution is only needed for final registration, not live detection
+        processed_image = resize_image(enhanced_image, max_size=960)
+        
+        # Detect faces with landmarks on enhanced and resized image
+        face_locations, face_landmarks_list = face_detection_service.detect_faces_with_landmarks(processed_image)
+        
+        # Scale face locations back to original image size if image was resized
+        if processed_image.shape != image.shape:
+            scale_h = height / processed_image.shape[0]
+            scale_w = width / processed_image.shape[1]
+            face_locations = [
+                (
+                    int(top * scale_h),
+                    int(right * scale_w),
+                    int(bottom * scale_h),
+                    int(left * scale_w)
+                )
+                for (top, right, bottom, left) in face_locations
+            ]
+            # Scale landmarks back to original size
+            if face_landmarks_list:
+                scaled_landmarks = []
+                for landmarks_dict in face_landmarks_list:
+                    scaled_dict = {}
+                    for key, points in landmarks_dict.items():
+                        scaled_dict[key] = [
+                            [int(p[0] * scale_w), int(p[1] * scale_h)]
+                            for p in points
+                        ]
+                    scaled_landmarks.append(scaled_dict)
+                face_landmarks_list = scaled_landmarks
         
         # Format response with enhanced information
         faces = []

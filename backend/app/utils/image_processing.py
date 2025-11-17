@@ -393,3 +393,87 @@ def extract_face_region(image: np.ndarray, face_location: Tuple[int, int, int, i
     
     return image[top:bottom, left:right]
 
+
+def enhance_image_for_detection(image: np.ndarray) -> np.ndarray:
+    """
+    Enhance image for better face detection, especially in low-light conditions.
+    Uses CLAHE (Contrast Limited Adaptive Histogram Equalization), gamma correction,
+    and adaptive brightness/contrast adjustment.
+    
+    This function is designed to be safe and non-destructive - it improves detection
+    reliability without significantly altering the original image appearance.
+    
+    Args:
+        image: numpy array representing image (RGB format)
+        
+    Returns:
+        Enhanced image array (same shape and dtype as input)
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    if image is None or image.size == 0:
+        logger.warning("Empty image provided for enhancement")
+        return image
+    
+    try:
+        # Convert to LAB color space for better perceptual processing
+        # LAB separates lightness from color, allowing better enhancement
+        lab_image = cv2.cvtColor(image, cv2.COLOR_RGB2LAB)
+        l_channel, a_channel, b_channel = cv2.split(lab_image)
+        
+        # Calculate mean brightness to detect low-light conditions
+        mean_brightness = np.mean(l_channel)
+        
+        # Apply CLAHE (Contrast Limited Adaptive Histogram Equalization)
+        # CLAHE is excellent for low-light images - it enhances contrast locally
+        # without over-amplifying noise or artifacts
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_channel_enhanced = clahe.apply(l_channel)
+        
+        # Adaptive gamma correction for brightness adjustment
+        # Only apply if image is too dark (mean brightness < 100)
+        if mean_brightness < 100:
+            # Calculate gamma for brightness adjustment
+            # Target brightness: 120 (good for face detection)
+            gamma = np.log(120.0 / 255.0) / np.log(mean_brightness / 255.0)
+            gamma = np.clip(gamma, 0.5, 2.0)  # Limit gamma to safe range
+            
+            # Apply gamma correction
+            inv_gamma = 1.0 / gamma
+            l_channel_enhanced = np.power(l_channel_enhanced / 255.0, inv_gamma) * 255.0
+            l_channel_enhanced = l_channel_enhanced.astype(np.uint8)
+        
+        # Adaptive contrast adjustment
+        # Boost contrast if standard deviation is low (flat images)
+        std_dev = np.std(l_channel_enhanced)
+        if std_dev < 25:  # Low contrast image
+            # Enhance contrast using histogram stretching
+            min_val = np.percentile(l_channel_enhanced, 2)
+            max_val = np.percentile(l_channel_enhanced, 98)
+            if max_val > min_val:
+                l_channel_enhanced = np.clip(
+                    ((l_channel_enhanced - min_val) / (max_val - min_val)) * 255.0,
+                    0, 255
+                ).astype(np.uint8)
+        
+        # Merge channels back to LAB
+        enhanced_lab = cv2.merge([l_channel_enhanced, a_channel, b_channel])
+        
+        # Convert back to RGB
+        enhanced_image = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
+        
+        # Ensure dtype matches input
+        if enhanced_image.dtype != image.dtype:
+            enhanced_image = enhanced_image.astype(image.dtype)
+        
+        logger.debug(f"Image enhanced: mean brightness {mean_brightness:.1f} -> {np.mean(l_channel_enhanced):.1f}, "
+                    f"std dev {std_dev:.1f} -> {np.std(l_channel_enhanced):.1f}")
+        
+        return enhanced_image
+        
+    except Exception as e:
+        logger.warning(f"Error enhancing image: {e}, returning original")
+        # If enhancement fails, return original image (fail-safe)
+        return image
+

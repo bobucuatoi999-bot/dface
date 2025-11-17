@@ -43,9 +43,15 @@ export const stopCamera = (stream) => {
   }
 }
 
-export const captureFrame = (videoElement) => {
+export const captureFrame = (videoElement, options = {}) => {
   return new Promise((resolve, reject) => {
     try {
+      const {
+        forDetection = false,  // If true, optimize for faster detection
+        maxSize = null,  // Maximum size for detection frames (default: 960px)
+        quality = null  // JPEG quality (default: 0.95 for registration, 0.85 for detection)
+      } = options
+
       // Validate video element
       if (!videoElement) {
         reject(new Error('Video element is not available'))
@@ -70,10 +76,24 @@ export const captureFrame = (videoElement) => {
         return
       }
 
-      // Create canvas with exact video dimensions
+      // For detection: resize to smaller size for faster processing
+      // For registration: use full resolution
+      let canvasWidth = videoWidth
+      let canvasHeight = videoHeight
+      
+      if (forDetection && maxSize) {
+        const maxDim = Math.max(videoWidth, videoHeight)
+        if (maxDim > maxSize) {
+          const scale = maxSize / maxDim
+          canvasWidth = Math.round(videoWidth * scale)
+          canvasHeight = Math.round(videoHeight * scale)
+        }
+      }
+
+      // Create canvas with optimized dimensions
       const canvas = document.createElement('canvas')
-      canvas.width = videoWidth
-      canvas.height = videoHeight
+      canvas.width = canvasWidth
+      canvas.height = canvasHeight
 
       const ctx = canvas.getContext('2d', {
         alpha: false,  // Disable alpha for better performance
@@ -82,16 +102,17 @@ export const captureFrame = (videoElement) => {
       })
 
       // Use high-quality image settings
-      // Smooth scaling for better image quality
       ctx.imageSmoothingEnabled = true
-      ctx.imageSmoothingQuality = 'high'
+      ctx.imageSmoothingQuality = forDetection ? 'medium' : 'high'  // Medium quality for faster detection
 
-      // Draw video frame to canvas
-      ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height)
+      // Draw video frame to canvas (scaled if needed)
+      ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight)
 
-      // Convert to JPEG with high quality (0.95 instead of 0.8 for better face detail)
-      // Higher quality preserves more face detail for detection
-      const imageData = canvas.toDataURL('image/jpeg', 0.95)
+      // Choose JPEG quality: lower for detection (faster), higher for registration (better quality)
+      const jpegQuality = quality !== null ? quality : (forDetection ? 0.85 : 0.95)
+
+      // Convert to JPEG
+      const imageData = canvas.toDataURL('image/jpeg', jpegQuality)
       
       if (!imageData || imageData.length < 100) {
         reject(new Error('Failed to capture frame - image data is too small'))
@@ -99,7 +120,8 @@ export const captureFrame = (videoElement) => {
       }
 
       // Log frame capture for debugging
-      console.debug(`Frame captured: ${videoWidth}x${videoHeight}, data length: ${imageData.length}`)
+      console.debug(`Frame captured: ${canvasWidth}x${canvasHeight} (from ${videoWidth}x${videoHeight}), ` +
+                   `quality=${jpegQuality}, forDetection=${forDetection}, data length=${imageData.length}`)
 
       resolve(imageToBase64(imageData))
     } catch (error) {
